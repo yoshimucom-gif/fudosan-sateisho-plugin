@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.0.0');
+define('FSS_VER', '1.1.0');
 define('FSS_OPT', 'fudosan_sateisho_options');
 define('FSS_ENDPOINT', 'https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001');
 
@@ -45,9 +45,11 @@ function fss_activate() {
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         created_at DATETIME NOT NULL,
         email VARCHAR(191) NOT NULL,
+        ptype VARCHAR(20) NULL,
+        address VARCHAR(255) NULL,
+        details LONGTEXT NULL,
         pref VARCHAR(50) NULL,
         city VARCHAR(50) NULL,
-        ptype VARCHAR(20) NULL,
         area FLOAT NULL,
         build_year INT NULL,
         station_min INT NULL,
@@ -75,10 +77,8 @@ function fss_ensure_columns() {
     $cols = $wpdb->get_col("SHOW COLUMNS FROM `$t`", 0);
     if (!is_array($cols)) return;
     $need = array(
-        'station_name' => 'VARCHAR(100) NULL',
-        'floor_plan'   => 'VARCHAR(30) NULL',
-        'district'     => 'VARCHAR(100) NULL',
-        'station_min'  => 'INT NULL',
+        'address'      => 'VARCHAR(255) NULL',
+        'details'      => 'LONGTEXT NULL',
         'purpose'      => 'VARCHAR(50) NULL',
     );
     foreach ($need as $c => $def) {
@@ -161,6 +161,61 @@ function fss_purposes() {
     );
 }
 
+/* セレクトの選択肢 */
+function fss_opt_list($key) {
+    switch ($key) {
+        case 'direction':    return array('北','北東','東','南東','南','南西','西','北西');
+        case 'land_right':   return array('所有権','借地権');
+        case 'structure':    return array('木造','軽量鉄骨造','重量鉄骨造','鉄筋コンクリート造(RC)','鉄骨鉄筋コンクリート造(SRC)','その他');
+        case 'road_contact': return array('一方','角地','二方','三方','四方');
+        case 'road_type':    return array('公道','私道');
+        case 'layout':       return array('1R','1K','1DK','1LDK','2K','2DK','2LDK','3K','3DK','3LDK','4LDK以上');
+    }
+    return array();
+}
+
+/* 物件種別ごとの入力項目（マンション/戸建て/土地で異なる）。
+   type: text|number|select|textarea|check、req: 必須、opts: fss_opt_list のキー */
+function fss_property_fields() {
+    return array(
+        'mansion' => array(
+            array('key'=>'mansion_name',  'label'=>'マンション名', 'type'=>'text',   'req'=>true,  'ph'=>'例：〇〇マンション'),
+            array('key'=>'floor',         'label'=>'階数',        'type'=>'number', 'req'=>false, 'ph'=>'例：5'),
+            array('key'=>'room_no',       'label'=>'部屋番号',    'type'=>'text',   'req'=>false, 'ph'=>'例：503'),
+            array('key'=>'exclusive_area','label'=>'専有面積（㎡）','type'=>'number','req'=>true,  'ph'=>'例：70'),
+            array('key'=>'direction',     'label'=>'方角',        'type'=>'select', 'req'=>false, 'opts'=>'direction'),
+            array('key'=>'corner',        'label'=>'角部屋',      'type'=>'check',  'req'=>false, 'chk'=>'角部屋である'),
+            array('key'=>'build_year',    'label'=>'築年（西暦）', 'type'=>'number', 'req'=>true,  'ph'=>'例：2015'),
+            array('key'=>'layout',        'label'=>'間取り',      'type'=>'select', 'req'=>false, 'opts'=>'layout'),
+            array('key'=>'reform',        'label'=>'リフォーム履歴','type'=>'textarea','req'=>false,'ph'=>'例：2020年に水回りをリフォーム'),
+        ),
+        'house' => array(
+            array('key'=>'floors',        'label'=>'階建',        'type'=>'number', 'req'=>false, 'ph'=>'例：2'),
+            array('key'=>'build_year',    'label'=>'築年（西暦）', 'type'=>'number', 'req'=>true,  'ph'=>'例：2010'),
+            array('key'=>'land_right',    'label'=>'土地権利',    'type'=>'select', 'req'=>true,  'opts'=>'land_right'),
+            array('key'=>'land_area',     'label'=>'土地面積（㎡）','type'=>'number','req'=>true,  'ph'=>'例：120'),
+            array('key'=>'building_area', 'label'=>'建物面積（㎡）','type'=>'number','req'=>true,  'ph'=>'例：95'),
+            array('key'=>'structure',     'label'=>'建築構造',    'type'=>'select', 'req'=>true,  'opts'=>'structure'),
+            array('key'=>'road_contact',  'label'=>'接道状況',    'type'=>'select', 'req'=>false, 'opts'=>'road_contact'),
+            array('key'=>'road_width',    'label'=>'前面道路幅員（m）','type'=>'number','req'=>false,'ph'=>'例：4'),
+            array('key'=>'road_direction','label'=>'接道方向',    'type'=>'select', 'req'=>false, 'opts'=>'direction'),
+            array('key'=>'road_type',     'label'=>'道路種別',    'type'=>'select', 'req'=>false, 'opts'=>'road_type'),
+            array('key'=>'road_frontage', 'label'=>'接道間口（m）','type'=>'number','req'=>false, 'ph'=>'例：5'),
+            array('key'=>'layout',        'label'=>'間取り',      'type'=>'select', 'req'=>false, 'opts'=>'layout'),
+            array('key'=>'reform',        'label'=>'リフォーム履歴','type'=>'textarea','req'=>false,'ph'=>'例：2020年に外壁塗装'),
+        ),
+        'land' => array(
+            array('key'=>'land_area',     'label'=>'土地面積（㎡）','type'=>'number','req'=>true,  'ph'=>'例：150'),
+            array('key'=>'land_right',    'label'=>'土地権利',    'type'=>'select', 'req'=>true,  'opts'=>'land_right'),
+            array('key'=>'road_contact',  'label'=>'接道状況',    'type'=>'select', 'req'=>true,  'opts'=>'road_contact'),
+            array('key'=>'road_width',    'label'=>'前面道路幅員（m）','type'=>'number','req'=>false,'ph'=>'例：4'),
+            array('key'=>'road_direction','label'=>'接道方向',    'type'=>'select', 'req'=>false, 'opts'=>'direction'),
+            array('key'=>'road_type',     'label'=>'道路種別',    'type'=>'select', 'req'=>false, 'opts'=>'road_type'),
+            array('key'=>'road_frontage', 'label'=>'接道間口（m）','type'=>'number','req'=>false, 'ph'=>'例：8'),
+        ),
+    );
+}
+
 /* teaser で選べる項目（fields属性で指定）。req=必須扱い */
 function fss_teaser_fields() {
     return array(
@@ -236,18 +291,12 @@ function fss_default_mail_body() {
 function fss_admin_notify_body($ctx, $email) {
     $pd = array();
     $pd[] = "■ 物件種別 : {$ctx['ptype_label']}";
-    $loc = trim($ctx['pref'] . ' ' . $ctx['city'] . (!empty($ctx['district']) ? ' ' . $ctx['district'] : ''));
-    $pd[] = "■ 所在地   : {$loc}";
-    $pd[] = "■ 面積     : {$ctx['area']} ㎡";
-    if (!empty($ctx['floor_plan'])) $pd[] = "■ 間取り   : {$ctx['floor_plan']}";
-    if (!empty($ctx['build_year'])) $pd[] = "■ 築年     : {$ctx['build_year']}年";
-    $st = trim((!empty($ctx['station_name']) ? $ctx['station_name'] : '') . (!empty($ctx['station_min']) ? " 徒歩{$ctx['station_min']}分" : ''));
-    if ($st !== '') $pd[] = "■ 最寄駅   : {$st}";
+    if (!empty($ctx['address'])) $pd[] = "■ 物件住所 : {$ctx['address']}";
     if (!empty($ctx['purpose'])) $pd[] = "■ 利用目的 : {$ctx['purpose']}";
+    if (!empty($ctx['details']))  $pd[] = $ctx['details'];
     return "査定書作成の受付が届きました。\n\n"
         . "■ お客様メール : {$email}\n"
         . implode("\n", $pd) . "\n"
-        . ($ctx['_marketing'] ?? false ? "■ 営業案内   : 希望あり\n" : "")
         . "\n管理画面「査定書作成受付 → 受付一覧」からも確認できます。";
 }
 
@@ -269,7 +318,7 @@ function fss_settings_page() {
         <p>ページに <code>[fudosan_sateisho]</code> を貼ると査定書作成の受付フォームが表示されます。詳しい書き方は「<strong>使い方</strong>」タブへ。</p>
         <h2 class="nav-tab-wrapper" id="fss-tabs">
             <a href="#" class="nav-tab nav-tab-active" data-tab="basic">基本設定</a>
-            <a href="#" class="nav-tab" data-tab="display">表示項目・対象エリア</a>
+            <a href="#" class="nav-tab" data-tab="display">表示項目</a>
             <a href="#" class="nav-tab" data-tab="mail">自動返信メール</a>
             <a href="#" class="nav-tab" data-tab="style">デザイン</a>
             <a href="#" class="nav-tab" data-tab="usage">使い方</a>
@@ -295,21 +344,13 @@ function fss_settings_page() {
             <div class="fss-tabpanel" data-tab="display" style="display:none">
             <h3>フォームに表示する任意項目</h3>
             <table class="form-table"><tr><th>表示する項目</th><td>
-                <label><input type="checkbox" name="<?php echo FSS_OPT; ?>[show_station]" value="1" <?php checked(fss_show('station')); ?>> 最寄駅・駅まで徒歩（分）</label><br>
-                <label><input type="checkbox" name="<?php echo FSS_OPT; ?>[show_floor_plan]" value="1" <?php checked(fss_show('floor_plan')); ?>> 間取り</label><br>
-                <label><input type="checkbox" name="<?php echo FSS_OPT; ?>[show_build_year]" value="1" <?php checked(fss_show('build_year')); ?>> 築年</label><br>
                 <label><input type="checkbox" name="<?php echo FSS_OPT; ?>[show_purpose]" value="1" <?php checked(fss_show('purpose')); ?>> 利用目的（売却検討・相続・離婚など）</label><br>
                 <label><input type="checkbox" name="<?php echo FSS_OPT; ?>[show_marketing]" value="1" <?php checked(fss_show('marketing')); ?>> 「営業案内メールを希望」チェック欄</label>
-                <p class="description">チェックを外した項目はフォームに表示されません。<br>※ 種別・都道府県・市区町村・面積・メール・同意チェックは常に表示されます。</p>
+                <p class="description">
+                    物件の入力項目（マンション／戸建て／土地ごとの項目）は、選ばれた種別に応じて自動で切り替わります。<br>
+                    ※ 物件種別・物件住所・メール・同意チェックは常に表示されます。
+                </p>
             </td></tr></table>
-
-            <h3>対象エリア（都道府県）</h3>
-            <p class="description">チェックした都道府県だけを選択肢に出します。<strong>1つも選ばなければ全国（47都道府県）</strong>が対象です。</p>
-            <div style="columns:4;-webkit-columns:4;max-width:820px;margin-top:8px">
-            <?php foreach (fss_prefs() as $code => $name): ?>
-                <label style="display:block;padding:2px 0"><input type="checkbox" name="<?php echo FSS_OPT; ?>[areas][]" value="<?php echo esc_attr($code); ?>" <?php checked(in_array((string)$code, array_map('strval', $sel_areas), true)); ?>> <?php echo esc_html($name); ?></label>
-            <?php endforeach; ?>
-            </div>
             </div>
 
             <div class="fss-tabpanel" data-tab="mail" style="display:none">
@@ -322,7 +363,7 @@ function fss_settings_page() {
                     <textarea name="<?php echo FSS_OPT; ?>[mail_body]" rows="22" style="width:100%;max-width:760px;font-family:monospace;font-size:13px"><?php echo esc_textarea(fss_opt('mail_body') ?: fss_default_mail_body()); ?></textarea>
                     <p class="description">
                         空欄にして保存すると初期文面に戻ります。使える差し込みタグ：<br>
-                        <code>{site_name}</code> <code>{property_details}</code>（物件情報のまとまり） <code>{ptype}</code> <code>{pref}</code> <code>{city}</code> <code>{area}</code> <code>{floor_plan}</code> <code>{build_year}</code> <code>{station}</code> <code>{purpose}</code> <code>{operator_name}</code> <code>{operator_contact}</code>
+                        <code>{site_name}</code> <code>{property_details}</code>（物件情報のまとまり） <code>{ptype}</code> <code>{address}</code> <code>{purpose}</code> <code>{details}</code> <code>{operator_name}</code> <code>{operator_contact}</code>
                         <br><strong style="color:#b32d2e">※「鑑定評価ではない」旨の免責文は必ず残してください（法的に重要です）。</strong>
                     </p>
                 </td></tr>
@@ -431,20 +472,18 @@ function fss_leads_page() {
     if ($dberr) echo '<div class="notice notice-error"><p><strong>直近に保存エラーが発生しました：</strong> ' . esc_html($dberr) . '<br>最新版に更新すると自動修復を試みます。解消されない場合は、この赤いメッセージの文面を共有してください。</p></div>';
     echo '<p>受付件数：' . $total . ' 件（表示は最新200件）　<a class="button button-primary" href="' . esc_url($export) . '">CSVエクスポート（Excel）</a></p>';
     echo '<table class="widefat striped"><thead><tr>';
-    echo '<th>受付日時</th><th>メール</th><th>利用目的</th><th>所在地</th><th>種別</th><th>面積</th><th>間取り</th><th>築年</th><th>最寄駅</th><th>営業可</th><th>操作</th></tr></thead><tbody>';
+    echo '<th>受付日時</th><th>メール</th><th>種別</th><th>物件住所</th><th>利用目的</th><th>詳細</th><th>営業可</th><th>操作</th></tr></thead><tbody>';
     if ($rows) foreach ($rows as $r) {
-        $st = trim((isset($r->station_name) ? $r->station_name : '') . (!empty($r->station_min) ? " 徒歩{$r->station_min}分" : ''));
         $plabel = isset($GLOBALS['FSS_PTYPE_LABEL'][$r->ptype]) ? $GLOBALS['FSS_PTYPE_LABEL'][$r->ptype] : $r->ptype;
+        $det = isset($r->details) ? (string)$r->details : '';
         $del = wp_nonce_url(admin_url('admin-post.php?action=fss_delete_lead&id=' . $r->id), 'fss_delete_lead_' . $r->id);
-        printf('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s %s %s</td><td>%s</td><td>%s㎡</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><a href="%s" onclick="return confirm(\'この受付を削除しますか？\')" style="color:#b32d2e">削除</a></td></tr>',
-            esc_html($r->created_at), esc_html($r->email),
+        printf('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td style="white-space:pre-line;font-size:12px;line-height:1.5">%s</td><td>%s</td><td><a href="%s" onclick="return confirm(\'この受付を削除しますか？\')" style="color:#b32d2e">削除</a></td></tr>',
+            esc_html($r->created_at), esc_html($r->email), esc_html($plabel),
+            esc_html((isset($r->address) && $r->address !== '') ? $r->address : '-'),
             esc_html((isset($r->purpose) && $r->purpose !== '') ? $r->purpose : '-'),
-            esc_html($r->pref), esc_html($r->city),
-            esc_html((isset($r->district) && $r->district !== '') ? $r->district : ''),
-            esc_html($plabel), esc_html($r->area), esc_html((isset($r->floor_plan) && $r->floor_plan !== '') ? $r->floor_plan : '-'), esc_html($r->build_year ?: '-'),
-            esc_html($st !== '' ? $st : '-'),
+            esc_html($det !== '' ? $det : '-'),
             $r->marketing_opt_in ? '○' : '', esc_url($del));
-    } else echo '<tr><td colspan="11">まだありません</td></tr>';
+    } else echo '<tr><td colspan="8">まだありません</td></tr>';
     echo '</tbody></table></div>';
 }
 
@@ -459,13 +498,17 @@ function fss_export_leads() {
     header('Content-Type: text/csv; charset=Shift_JIS');
     header('Content-Disposition: attachment; filename="sateisho_uketsuke.csv"');
     $out = fopen('php://output', 'w');
-    $head = array('ID','受付日時','メール','利用目的','都道府県','市区町村','種別','面積','間取り','築年','最寄駅','徒歩分','営業同意');
-    $cols = array('id','created_at','email','purpose','pref','city','ptype','area','floor_plan','build_year','station_name','station_min','marketing_opt_in');
+    $head = array('ID','受付日時','メール','種別','物件住所','利用目的','詳細','営業同意');
+    $cols = array('id','created_at','email','ptype','address','purpose','details','marketing_opt_in');
     $sjis = function ($s) { return mb_convert_encoding((string)$s, 'SJIS-win', 'UTF-8'); };
     fputcsv($out, array_map($sjis, $head));
     foreach ($rows as $r) {
         $line = array();
-        foreach ($cols as $c) $line[] = $sjis(isset($r[$c]) ? $r[$c] : '');
+        foreach ($cols as $c) {
+            $v = isset($r[$c]) ? $r[$c] : '';
+            if ($c === 'ptype' && isset($GLOBALS['FSS_PTYPE_LABEL'][$v])) $v = $GLOBALS['FSS_PTYPE_LABEL'][$v];
+            $line[] = $sjis($v);
+        }
         fputcsv($out, $line);
     }
     fclose($out);
@@ -729,30 +772,20 @@ function fss_mail_body($ctx) {
     $tmpl = fss_opt('mail_body', '');
     if (trim($tmpl) === '') $tmpl = fss_default_mail_body();
 
-    // 物件情報のまとまり（入力があるものだけ行を出す）
+    // 物件情報のまとまり（種別＋住所＋種別別の詳細）
     $pd = array();
     $pd[] = "■ 物件種別 : {$ctx['ptype_label']}";
-    $loc = trim($ctx['pref'] . ' ' . $ctx['city'] . (!empty($ctx['district']) ? ' ' . $ctx['district'] : ''));
-    $pd[] = "■ 所在地   : {$loc}";
-    $pd[] = "■ 面積     : {$ctx['area']} ㎡";
-    if (!empty($ctx['floor_plan'])) $pd[] = "■ 間取り   : {$ctx['floor_plan']}";
-    if (!empty($ctx['build_year'])) $pd[] = "■ 築年     : {$ctx['build_year']}年";
-    $st = trim((!empty($ctx['station_name']) ? $ctx['station_name'] : '') . (!empty($ctx['station_min']) ? " 徒歩{$ctx['station_min']}分" : ''));
-    if ($st !== '') $pd[] = "■ 最寄駅   : {$st}";
+    if (!empty($ctx['address'])) $pd[] = "■ 物件住所 : {$ctx['address']}";
     if (!empty($ctx['purpose'])) $pd[] = "■ 利用目的 : {$ctx['purpose']}";
+    if (!empty($ctx['details']))  $pd[] = $ctx['details'];
 
     $repl = array(
         '{site_name}'        => fss_opt('site_name', '査定書作成受付'),
         '{property_details}' => implode("\n", $pd),
         '{ptype}'            => $ctx['ptype_label'],
-        '{pref}'             => $ctx['pref'],
-        '{city}'             => $ctx['city'],
-        '{district}'         => isset($ctx['district']) ? $ctx['district'] : '',
-        '{area}'             => $ctx['area'],
-        '{floor_plan}'       => isset($ctx['floor_plan']) ? $ctx['floor_plan'] : '',
-        '{build_year}'       => isset($ctx['build_year']) ? $ctx['build_year'] : '',
-        '{station}'          => $st,
+        '{address}'          => isset($ctx['address']) ? $ctx['address'] : '',
         '{purpose}'          => isset($ctx['purpose']) ? $ctx['purpose'] : '',
+        '{details}'          => isset($ctx['details']) ? $ctx['details'] : '',
         '{operator_name}'    => fss_opt('operator_name', ''),
         '{operator_contact}' => fss_opt('operator_contact', ''),
     );
@@ -773,9 +806,8 @@ function fss_test_mail() {
     check_admin_referer('fss_test_mail');
     $to = wp_get_current_user()->user_email;
     $ctx = array(
-        'ptype_label' => '中古マンション', 'pref' => '東京都', 'city' => '渋谷区', 'district' => '恵比寿',
-        'area' => 70, 'floor_plan' => '2LDK', 'build_year' => 2015,
-        'station_name' => '恵比寿駅', 'station_min' => 5, 'purpose' => '相続した・相続する予定',
+        'ptype_label' => 'マンション', 'address' => '東京都渋谷区〇〇1-2-3', 'purpose' => '相続した・相続する予定',
+        'details' => "■ マンション名 : 〇〇マンション\n■ 専有面積（㎡） : 70\n■ 築年（西暦） : 2015\n■ 間取り : 2LDK",
     );
     $headers = array('Content-Type: text/plain; charset=UTF-8');
     $from = fss_opt('from_email'); $site = fss_opt('site_name', '査定書作成受付');
@@ -793,41 +825,54 @@ add_action('wp_ajax_nopriv_fudosan_sateisho', 'fss_ajax');
 function fss_ajax() {
     check_ajax_referer('fudosan_sateisho', 'nonce');
 
-    $ptype = sanitize_text_field($_POST['ptype'] ?? '');
-    $pref  = sanitize_text_field($_POST['pref_code'] ?? '');
-    $city  = sanitize_text_field($_POST['city_code'] ?? '');
-    $email = sanitize_email($_POST['email'] ?? '');
-    $area  = floatval($_POST['area'] ?? 0);
-    $byear = ($_POST['build_year'] ?? '') !== '' ? intval($_POST['build_year']) : null;
-    $smin  = ($_POST['station_min'] ?? '') !== '' ? intval($_POST['station_min']) : null;
-    $sname = sanitize_text_field($_POST['station_name'] ?? '');
-    $fplan = sanitize_text_field($_POST['floor_plan'] ?? '');
-    $district = sanitize_text_field($_POST['district'] ?? '');
+    $ptype   = sanitize_text_field($_POST['ptype'] ?? '');
+    $address = sanitize_text_field($_POST['address'] ?? '');
+    $email   = sanitize_email($_POST['email'] ?? '');
+    $note    = sanitize_textarea_field($_POST['note_text'] ?? '');
     $purpose = sanitize_text_field($_POST['purpose'] ?? '');
-    if ($purpose !== '' && !in_array($purpose, fss_purposes(), true)) $purpose = ''; // 選択肢以外は無視
+    if ($purpose !== '' && !in_array($purpose, fss_purposes(), true)) $purpose = '';
     $agree = !empty($_POST['agree']);
     $mkt   = !empty($_POST['marketing']);
 
     $errors = array();
     if (!$agree) $errors[] = '個人情報の取扱いへの同意が必要です。';
     if (!is_email($email)) $errors[] = 'メールアドレスの形式が正しくありません。';
-    if (!isset(fss_prefs()[$pref]) || !$city) $errors[] = '都道府県・市区町村を選択してください。';
+    if ($address === '') $errors[] = '物件の住所を入力してください。';
     if (!isset($GLOBALS['FSS_PTYPE_MAP'][$ptype])) $errors[] = '物件種別を選択してください。';
-    if ($area <= 0 || $area > 100000) $errors[] = '面積（㎡）を正しく入力してください。';
+
+    // 選択された種別のスキーマで各項目を取得・検証し、詳細テキストを組み立てる
+    $schema = fss_property_fields();
+    $detail_lines = array();
+    if (isset($schema[$ptype])) {
+        foreach ($schema[$ptype] as $fd) {
+            $post_key = $ptype . '__' . $fd['key'];
+            if ($fd['type'] === 'check') {
+                $val = !empty($_POST[$post_key]) ? 'はい' : '';
+            } elseif ($fd['type'] === 'textarea') {
+                $val = sanitize_textarea_field($_POST[$post_key] ?? '');
+            } else {
+                $val = sanitize_text_field($_POST[$post_key] ?? '');
+            }
+            // 選択肢は選択肢外を無視
+            if ($fd['type'] === 'select' && $val !== '' && !in_array($val, fss_opt_list($fd['opts']), true)) $val = '';
+            if (!empty($fd['req']) && $val === '') {
+                $errors[] = '「' . $fd['label'] . '」を入力してください。';
+            }
+            if ($val !== '') $detail_lines[] = '■ ' . $fd['label'] . ' : ' . $val;
+        }
+    }
     if ($errors) wp_send_json(array('ok' => false, 'errors' => $errors));
 
-    $pref_name = fss_prefs()[$pref];
-    $city_name = fss_city_name($pref, $city);
     $label = $GLOBALS['FSS_PTYPE_LABEL'][$ptype];
+    if ($note !== '') $detail_lines[] = '■ 備考 : ' . $note;
+    $details = implode("\n", $detail_lines);
 
     // リード保存（受付）
     global $wpdb;
     $row = array(
         'created_at' => current_time('mysql'), 'email' => $email,
-        'pref' => $pref_name, 'city' => $city_name, 'ptype' => $ptype,
-        'area' => $area, 'build_year' => $byear, 'station_min' => $smin,
-        'station_name' => $sname, 'floor_plan' => $fplan, 'district' => $district, 'purpose' => $purpose,
-        'marketing_opt_in' => $mkt ? 1 : 0,
+        'ptype' => $ptype, 'address' => $address, 'details' => $details,
+        'purpose' => $purpose, 'marketing_opt_in' => $mkt ? 1 : 0,
     );
     $ins = $wpdb->insert($wpdb->prefix . 'fudosan_sateisho_leads', $row);
     if ($ins === false) {
@@ -839,9 +884,7 @@ function fss_ajax() {
     }
 
     $ctx = array(
-        'ptype_label' => $label, 'pref' => $pref_name, 'city' => $city_name, 'area' => $area, 'build_year' => $byear,
-        'district' => $district, 'station_name' => $sname, 'station_min' => $smin, 'floor_plan' => $fplan,
-        'purpose' => $purpose,
+        'ptype_label' => $label, 'address' => $address, 'details' => $details, 'purpose' => $purpose,
     );
 
     // 受付完了メール（お客様へ）
@@ -859,9 +902,7 @@ function fss_ajax() {
 
     wp_send_json(array(
         'ok' => true, 'mail_ok' => (bool)$mail_ok, 'email' => $email,
-        'ptype_label' => $label, 'pref' => $pref_name, 'city' => $city_name,
-        'area' => $area, 'build_year' => $byear, 'station_min' => $smin,
-        'station_name' => $sname, 'floor_plan' => $fplan, 'district' => $district, 'purpose' => $purpose,
+        'ptype_label' => $label, 'address' => $address, 'details' => $details, 'purpose' => $purpose,
     ));
 }
 
@@ -1118,60 +1159,41 @@ function fss_shortcode($atts = array()) {
 
       <div class="fss-section">物件の情報</div>
       <label>物件種別<span class="fss-req">必須</span></label>
-      <select name="ptype" required><?php echo $ptype_options; ?></select>
+      <select name="ptype" id="fss-ptype" required><?php echo $ptype_options; ?></select>
 
-      <div class="fss-row">
-        <div>
-          <label>都道府県<span class="fss-req">必須</span></label>
-          <select class="fss-pref" name="pref_code" id="fss-pref" required><?php echo $pref_options; ?></select>
+      <label>物件の住所<span class="fss-req">必須</span></label>
+      <input type="text" name="address" placeholder="例：東京都渋谷区〇〇1-2-3" required>
+      <div class="fss-hint">丁目・番地までご記入ください（建物名・部屋番号は下の欄で結構です）</div>
+
+<?php foreach (fss_property_fields() as $pt => $flds): ?>
+      <div class="fss-group" data-ptype="<?php echo esc_attr($pt); ?>" style="display:none">
+<?php foreach ($flds as $fd): $nm = $pt . '__' . $fd['key']; ?>
+<?php if ($fd['type'] === 'check'): ?>
+        <div class="fss-check">
+          <input type="checkbox" name="<?php echo esc_attr($nm); ?>" id="<?php echo esc_attr($nm); ?>" value="1">
+          <label for="<?php echo esc_attr($nm); ?>"><?php echo esc_html($fd['chk']); ?></label>
         </div>
-        <div>
-          <label>市区町村<span class="fss-req">必須</span></label>
-          <select class="fss-city" name="city_code" id="fss-city" required><option value="">先に都道府県を選択</option></select>
-        </div>
+<?php else: ?>
+        <label><?php echo esc_html($fd['label']); ?><?php echo $fd['req'] ? '<span class="fss-req">必須</span>' : '<span class="fss-opt">任意</span>'; ?></label>
+<?php if ($fd['type'] === 'select'): ?>
+        <select name="<?php echo esc_attr($nm); ?>" class="fss-typed" data-req="<?php echo $fd['req'] ? '1' : ''; ?>">
+          <option value="">選択してください</option>
+<?php foreach (fss_opt_list($fd['opts']) as $o): ?>
+          <option value="<?php echo esc_attr($o); ?>"><?php echo esc_html($o); ?></option>
+<?php endforeach; ?>
+        </select>
+<?php elseif ($fd['type'] === 'textarea'): ?>
+        <textarea name="<?php echo esc_attr($nm); ?>" class="fss-typed" data-req="" rows="2" placeholder="<?php echo esc_attr(isset($fd['ph']) ? $fd['ph'] : ''); ?>"></textarea>
+<?php else: ?>
+        <input type="<?php echo $fd['type'] === 'number' ? 'number' : 'text'; ?>"<?php echo $fd['type'] === 'number' ? ' step="any" min="0"' : ''; ?> name="<?php echo esc_attr($nm); ?>" class="fss-typed" data-req="<?php echo $fd['req'] ? '1' : ''; ?>" placeholder="<?php echo esc_attr(isset($fd['ph']) ? $fd['ph'] : ''); ?>">
+<?php endif; ?>
+<?php endif; ?>
+<?php endforeach; ?>
       </div>
+<?php endforeach; ?>
 
-<?php endif; ?>
-
-<?php if (!$teaser): ?>
-      <div class="fss-row">
-        <div>
-          <label>面積（㎡）<span class="fss-req">必須</span></label>
-          <input type="number" name="area" step="0.01" min="1" placeholder="例：70" required>
-          <div class="fss-hint">マンション・戸建は専有/延床、土地は敷地面積</div>
-        </div>
-<?php if ($show_build_year): ?>
-        <div>
-          <label>築年（西暦）<span class="fss-opt">任意</span></label>
-          <input type="number" name="build_year" min="1950" max="<?php echo $year; ?>" placeholder="例：2015">
-          <div class="fss-hint">土地の場合は不要</div>
-        </div>
-<?php endif; ?>
-      </div>
-<?php endif; ?>
-
-<?php if ($show_station): ?>
-      <div class="fss-row">
-        <div>
-          <label>最寄駅<span class="fss-opt">任意</span></label>
-          <input type="text" name="station_name" placeholder="例：渋谷駅">
-        </div>
-        <div>
-          <label>駅まで徒歩（分）<span class="fss-opt">任意</span></label>
-          <input type="number" name="station_min" min="0" max="60" placeholder="例：8">
-        </div>
-      </div>
-<?php endif; ?>
-
-<?php if ($show_floor_plan): ?>
-      <label>間取り<span class="fss-opt">任意</span></label>
-      <select name="floor_plan">
-        <option value="">選択しない</option>
-        <option>1R</option><option>1K</option><option>1DK</option><option>1LDK</option>
-        <option>2K</option><option>2DK</option><option>2LDK</option>
-        <option>3K</option><option>3DK</option><option>3LDK</option>
-        <option>4LDK以上</option>
-      </select>
+      <label>備考・その他<span class="fss-opt">任意</span></label>
+      <textarea name="note_text" rows="2" placeholder="複数の接道がある場合など、補足があればご記入ください"></textarea>
 <?php endif; ?>
 
 <?php if (!$teaser): ?>
@@ -1242,25 +1264,35 @@ function fss_shortcode($atts = array()) {
     cov.innerHTML = html;
   }
 
-  // 入力済みの必須項目は「必須」→ ✓ に、次に入力すべき欄を光らせる（全デザイン共通）
-  var REQUIRED = <?php echo wp_json_encode($required_names); ?>;
+  // 物件種別ごとの項目グループ
+  var groups = wrap.querySelectorAll('.fss-group');
 
-  // teaser は .fss-trow 内の .fss-badge、それ以外は直前の <label> 内の .fss-req
+  // 直前の <label> 内の「必須」バッジ
   function badgeFor(el){
-    var row = el.closest ? el.closest('.fss-trow') : null;
-    if (row) return row.querySelector('.fss-badge');
     var lbl = el.previousElementSibling;
     return (lbl && lbl.tagName === 'LABEL') ? lbl.querySelector('.fss-req') : null;
   }
 
-  var resumeBox = null; // 「続きはこちらから」バナー
+  // 画面の並び順に：種別 → 住所 → 選択中の種別の必須項目 → メール
+  function currentRequired(){
+    var req = [];
+    if (form.elements['ptype'])   req.push(form.elements['ptype']);
+    if (form.elements['address']) req.push(form.elements['address']);
+    var pt = ptypeSel ? ptypeSel.value : '';
+    if (pt) {
+      var g = wrap.querySelector('.fss-group[data-ptype="' + pt + '"]');
+      if (g) Array.prototype.forEach.call(g.querySelectorAll('[data-req="1"]'), function(el){ req.push(el); });
+    }
+    if (form.elements['email'])   req.push(form.elements['email']);
+    return req;
+  }
+
+  var resumeBox = null;
 
   function updateFormState(){
-    var firstEmpty = null, remaining = 0;
-    REQUIRED.forEach(function(name){
-      var el = form.elements[name];
-      if (!el) return;
-      el.classList.remove('fss-next');
+    Array.prototype.forEach.call(form.querySelectorAll('.fss-next'), function(e){ e.classList.remove('fss-next'); });
+    var req = currentRequired(), firstEmpty = null, remaining = 0;
+    req.forEach(function(el){
       var b = badgeFor(el);
       var filled = !!(el.value && String(el.value).trim() !== '');
       if (b) {
@@ -1270,24 +1302,19 @@ function fss_shortcode($atts = array()) {
       if (!filled) { remaining++; if (!firstEmpty) firstEmpty = el; }
     });
     if (firstEmpty) firstEmpty.classList.add('fss-next');
-
     if (resumeBox) {
-      if (remaining === 0) { resumeBox.style.display = 'none'; }
-      else {
-        resumeBox.style.display = '';
-        resumeBox.querySelector('span').textContent = 'あと' + remaining + '項目で完了です';
-      }
+      if (remaining === 0) resumeBox.style.display = 'none';
+      else { resumeBox.style.display = ''; resumeBox.querySelector('span').textContent = 'あと' + remaining + '項目で完了です'; }
     }
   }
 
-  // 引き継ぎで来たとき、最初の未入力欄の直前にバナーを差し込む
   function insertResumeBanner(){
     var el = wrap.querySelector('.fss-next');
     if (!el) return;
-    var anchor = el;                                   // フォーム直下のブロックまで遡る
+    var anchor = el;
     while (anchor && anchor.parentNode !== form) anchor = anchor.parentNode;
     if (!anchor) return;
-    var prev = anchor.previousElementSibling;          // ラベルがあればその手前に置く
+    var prev = anchor.previousElementSibling;
     if (prev && prev.tagName === 'LABEL') anchor = prev;
     resumeBox = document.createElement('div');
     resumeBox.className = 'fss-resume';
@@ -1296,24 +1323,22 @@ function fss_shortcode($atts = array()) {
     updateFormState();
   }
 
-  REQUIRED.forEach(function(name){
-    var el = form.elements[name];
-    if (!el) return;
+  // 種別を選ぶと、その種別の入力欄だけ表示
+  function switchType(){
+    var pt = ptypeSel ? ptypeSel.value : '';
+    Array.prototype.forEach.call(groups, function(g){
+      g.style.display = (g.getAttribute('data-ptype') === pt) ? '' : 'none';
+    });
+    updateFormState();
+  }
+
+  if (ptypeSel) ptypeSel.addEventListener('change', switchType);
+  Array.prototype.forEach.call(form.querySelectorAll('.fss-typed, input[name="address"], input[name="email"]'), function(el){
     el.addEventListener('change', updateFormState);
     el.addEventListener('input', updateFormState);
   });
 
-  if (pref) pref.addEventListener('change', function(){
-    var list = CITIES[pref.value] || [];
-    if (city) city.innerHTML = '<option value="">' + (pref.value ? '選択してください' : '先に都道府県を選択') + '</option>' +
-      list.map(function(c){ return '<option value="'+c[0]+'">'+c[1]+'</option>'; }).join('');
-    updateFormState();
-  });
-
-  if (city) city.addEventListener('change', updateFormState);
-  if (ptypeSel) ptypeSel.addEventListener('change', updateFormState);
-
-  updateFormState(); // 初期表示（最初の未入力欄を光らせる）
+  switchType(); // 初期表示（種別グループ反映＋ガイド）
 
   // 引き継ぎで来たときは、最初の未入力欄（＝光っている欄）まで自動スクロール
   function scrollToFirstEmpty(){
@@ -1389,20 +1414,20 @@ function fss_shortcode($atts = array()) {
   });
 
   function renderResult(d){
-    var st = (d.station_name ? esc(d.station_name) : '') + (d.station_min ? ' 徒歩'+esc(d.station_min)+'分' : '');
     var rows = '<tr><th>物件種別</th><td>'+esc(d.ptype_label)+'</td></tr>'
-      + '<tr><th>所在地</th><td>'+esc(d.pref)+' '+esc(d.city)+(d.district?' '+esc(d.district):'')+'</td></tr>'
-      + '<tr><th>面積</th><td>'+esc(d.area)+' ㎡</td></tr>'
-      + (d.floor_plan ? '<tr><th>間取り</th><td>'+esc(d.floor_plan)+'</td></tr>' : '')
-      + (d.build_year ? '<tr><th>築年</th><td>'+esc(d.build_year)+'年</td></tr>' : '')
-      + (st.trim() ? '<tr><th>最寄駅</th><td>'+st+'</td></tr>' : '')
+      + (d.address ? '<tr><th>物件住所</th><td>'+esc(d.address)+'</td></tr>' : '')
       + (d.purpose ? '<tr><th>利用目的</th><td>'+esc(d.purpose)+'</td></tr>' : '');
+    var det = '';
+    if (d.details) {
+      det = '<div class="fss-hint" style="white-space:pre-line;margin-top:10px">'+esc(d.details)+'</div>';
+    }
     var mailLine = d.mail_ok
       ? '<p class="fss-ok">✓ '+esc(d.email)+' 宛に受付完了メールをお送りしました。</p>'
       : '<p class="fss-hint">受付は完了しています（確認メールの送信に失敗した可能性があります。担当より別途ご連絡します）。</p>';
     var html = '<h3 style="margin-top:0">査定書作成のお申し込みを受け付けました</h3>'
       + '<p>以下の内容で受け付けました。<strong>担当者が査定書を作成し、後日メールでお送りします。</strong></p>'
       + '<table class="fss-spec">'+rows+'</table>'
+      + det
       + mailLine
       + '<div class="fss-disc">作成する査定書は宅建業者による<strong>参考価格（価格査定）</strong>であり、不動産鑑定士による<strong>鑑定評価ではありません</strong>。実際の売却価格を保証するものではありません。</div>';
     resultCard.innerHTML = html;

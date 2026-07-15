@@ -1,6 +1,6 @@
 {
   "name": "不動産 査定書作成受付",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "download_url": "https://raw.githubusercontent.com/yoshimucom-gif/fudosan-sateisho-plugin/main/fudosan-sateisho.zip",
   "requires": "5.8",
   "tested": "6.7",
@@ -8,6 +8,6 @@
   "author": "ミカタ株式会社",
   "homepage": "https://github.com/yoshimucom-gif/fudosan-sateisho-plugin",
   "sections": {
-    "changelog": "1.0.0\n初版リリース。査定書作成の受付フォーム(受付完了メール自動返信+担当者通知)。"
+    "changelog": "1.1.0\n・入力項目を物件種別(マンション/戸建て/土地)ごとに切替。物件住所を必須化。方角/土地権利/建築構造/接道状況/道路種別をプルダウン化。詳細はまとめて保存しメール・受付一覧・CSVに反映"
   }
 }
