@@ -1,6 +1,6 @@
 {
   "name": "不動産 査定書作成受付",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "download_url": "https://raw.githubusercontent.com/yoshimucom-gif/fudosan-sateisho-plugin/main/fudosan-sateisho.zip",
   "requires": "5.8",
   "tested": "6.7",
@@ -8,6 +8,6 @@
   "author": "ミカタ株式会社",
   "homepage": "https://github.com/yoshimucom-gif/fudosan-sateisho-plugin",
   "sections": {
-    "changelog": "1.1.1\n・物件種別の下に「選ぶと入力項目が表示されます」のヒントを追加"
+    "changelog": "1.1.2\n・入力フォームを2カラム化してコンパクトに（種別項目を横並び、長文欄は全幅）"
   }
 }

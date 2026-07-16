@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.1.1
+ * Version: 1.1.2
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.1.1');
+define('FSS_VER', '1.1.2');
 define('FSS_OPT', 'fudosan_sateisho_options');
 define('FSS_ENDPOINT', 'https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001');
 
@@ -1032,6 +1032,12 @@ function fss_shortcode($atts = array()) {
     .fss-wrap input,.fss-wrap select{width:100%;padding:14px 15px;border:1px solid #cbd5e1;border-radius:9px;font-size:18px;background:#fff;box-sizing:border-box;transition:border-color .15s,box-shadow .15s}
     .fss-wrap input:focus,.fss-wrap select:focus{outline:none;border-color:var(--fss-brand);box-shadow:0 0 0 3px rgba(var(--fss-brand-rgb),.15)}
     .fss-row{display:flex;gap:12px}.fss-row>div{flex:1}
+    /* 種別項目は2カラムでコンパクトに（textarea・チェックは全幅） */
+    .fss-group{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;align-items:start}
+    .fss-field{min-width:0}
+    .fss-field.fss-full{grid-column:1/-1}
+    .fss-field > label:first-child{margin-top:16px}
+    @media(max-width:560px){.fss-group{grid-template-columns:1fr}}
     .fss-hint{color:var(--fss-muted);font-size:15px;margin-top:5px;line-height:1.7}
     .fss-check{display:flex;gap:9px;align-items:flex-start;margin-top:14px}
     .fss-check input{width:auto;margin-top:6px;transform:scale(1.2)}.fss-check label{margin:0;font-weight:400;font-size:16px}
@@ -1055,6 +1061,7 @@ function fss_shortcode($atts = array()) {
     .fss-design-compact input,.fss-design-compact select,.fss-design-teaser input,.fss-design-teaser select{padding:11px 12px;font-size:16px}
     .fss-design-compact button,.fss-design-teaser button{margin-top:16px;padding:14px;font-size:17px}
     .fss-design-compact .fss-form .fss-hint,.fss-design-teaser .fss-form .fss-hint{display:none}
+    .fss-design-compact .fss-group,.fss-design-teaser .fss-group{grid-template-columns:1fr} /* 幅が狭いので1カラム */
     .fss-design-compact .fss-section{display:none} /* 短くするため見出しは省略 */
     .fss-design-compact .fss-coverage,.fss-design-teaser .fss-coverage{font-size:13px;margin-top:6px}
     .fss-design-compact .fss-check label{font-size:14px}
@@ -1168,27 +1175,29 @@ function fss_shortcode($atts = array()) {
 
 <?php foreach (fss_property_fields() as $pt => $flds): ?>
       <div class="fss-group" data-ptype="<?php echo esc_attr($pt); ?>" style="display:none">
-<?php foreach ($flds as $fd): $nm = $pt . '__' . $fd['key']; ?>
+<?php foreach ($flds as $fd): $nm = $pt . '__' . $fd['key']; $full = ($fd['type'] === 'textarea'); ?>
+        <div class="fss-field<?php echo $full ? ' fss-full' : ''; ?>">
 <?php if ($fd['type'] === 'check'): ?>
-        <div class="fss-check">
-          <input type="checkbox" name="<?php echo esc_attr($nm); ?>" id="<?php echo esc_attr($nm); ?>" value="1">
-          <label for="<?php echo esc_attr($nm); ?>"><?php echo esc_html($fd['chk']); ?></label>
-        </div>
+          <div class="fss-check">
+            <input type="checkbox" name="<?php echo esc_attr($nm); ?>" id="<?php echo esc_attr($nm); ?>" value="1">
+            <label for="<?php echo esc_attr($nm); ?>"><?php echo esc_html($fd['chk']); ?></label>
+          </div>
 <?php else: ?>
-        <label><?php echo esc_html($fd['label']); ?><?php echo $fd['req'] ? '<span class="fss-req">必須</span>' : '<span class="fss-opt">任意</span>'; ?></label>
+          <label><?php echo esc_html($fd['label']); ?><?php echo $fd['req'] ? '<span class="fss-req">必須</span>' : '<span class="fss-opt">任意</span>'; ?></label>
 <?php if ($fd['type'] === 'select'): ?>
-        <select name="<?php echo esc_attr($nm); ?>" class="fss-typed" data-req="<?php echo $fd['req'] ? '1' : ''; ?>">
-          <option value="">選択してください</option>
+          <select name="<?php echo esc_attr($nm); ?>" class="fss-typed" data-req="<?php echo $fd['req'] ? '1' : ''; ?>">
+            <option value="">選択してください</option>
 <?php foreach (fss_opt_list($fd['opts']) as $o): ?>
-          <option value="<?php echo esc_attr($o); ?>"><?php echo esc_html($o); ?></option>
+            <option value="<?php echo esc_attr($o); ?>"><?php echo esc_html($o); ?></option>
 <?php endforeach; ?>
-        </select>
+          </select>
 <?php elseif ($fd['type'] === 'textarea'): ?>
-        <textarea name="<?php echo esc_attr($nm); ?>" class="fss-typed" data-req="" rows="2" placeholder="<?php echo esc_attr(isset($fd['ph']) ? $fd['ph'] : ''); ?>"></textarea>
+          <textarea name="<?php echo esc_attr($nm); ?>" class="fss-typed" data-req="" rows="2" placeholder="<?php echo esc_attr(isset($fd['ph']) ? $fd['ph'] : ''); ?>"></textarea>
 <?php else: ?>
-        <input type="<?php echo $fd['type'] === 'number' ? 'number' : 'text'; ?>"<?php echo $fd['type'] === 'number' ? ' step="any" min="0"' : ''; ?> name="<?php echo esc_attr($nm); ?>" class="fss-typed" data-req="<?php echo $fd['req'] ? '1' : ''; ?>" placeholder="<?php echo esc_attr(isset($fd['ph']) ? $fd['ph'] : ''); ?>">
+          <input type="<?php echo $fd['type'] === 'number' ? 'number' : 'text'; ?>"<?php echo $fd['type'] === 'number' ? ' step="any" min="0"' : ''; ?> name="<?php echo esc_attr($nm); ?>" class="fss-typed" data-req="<?php echo $fd['req'] ? '1' : ''; ?>" placeholder="<?php echo esc_attr(isset($fd['ph']) ? $fd['ph'] : ''); ?>">
 <?php endif; ?>
 <?php endif; ?>
+        </div>
 <?php endforeach; ?>
       </div>
 <?php endforeach; ?>
