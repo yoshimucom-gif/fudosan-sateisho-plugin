@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.1.3
+ * Version: 1.1.4
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.1.3');
+define('FSS_VER', '1.1.4');
 define('FSS_OPT', 'fudosan_sateisho_options');
 define('FSS_ENDPOINT', 'https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001');
 
@@ -789,7 +789,10 @@ function fss_mail_body($ctx) {
         '{operator_name}'    => fss_opt('operator_name', ''),
         '{operator_contact}' => fss_opt('operator_contact', ''),
     );
-    return strtr($tmpl, $repl);
+    // 未設定の項目で「お問い合わせ: 」のようにラベルだけが残らないよう、その行ごと落とす
+    if (trim($repl['{operator_contact}']) === '') $tmpl = preg_replace('/^.*\{operator_contact\}.*\R?/m', '', $tmpl);
+    if (trim($repl['{operator_name}'])    === '') $tmpl = preg_replace('/^\h*\{operator_name\}\h*\R?/m', '', $tmpl);
+    return rtrim(strtr($tmpl, $repl)) . "\n";
 }
 
 /* 件名テンプレ */
