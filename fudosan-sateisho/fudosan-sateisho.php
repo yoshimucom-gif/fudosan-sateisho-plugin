@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.1.2
+ * Version: 1.1.3
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.1.2');
+define('FSS_VER', '1.1.3');
 define('FSS_OPT', 'fudosan_sateisho_options');
 define('FSS_ENDPOINT', 'https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001');
 
@@ -1013,7 +1013,7 @@ function fss_shortcode($atts = array()) {
   <style>
     .fss-wrap{--fss-brand:<?php echo esc_attr($c_brand); ?>;--fss-brand-rgb:<?php echo esc_attr($c_brand_rgb); ?>;--fss-btn-text:<?php echo esc_attr($c_btn_text); ?>;--fss-title:<?php echo esc_attr($c_title); ?>;--fss-badge-bg:<?php echo esc_attr($c_badge); ?>;--fss-ink:#1a1f36;--fss-muted:#6b7280;--fss-line:#e5e7eb;width:100%;max-width:none;margin:0;color:var(--fss-ink);font-family:inherit;line-height:1.75;font-size:17px}
     .fss-card{background:transparent;border:0;border-radius:0;padding:0}
-    .fss-wrap label{display:block;font-weight:600;margin:18px 0 7px;font-size:19px}
+    .fss-wrap label{display:block;font-weight:700;margin:18px 0 7px;font-size:17px;color:#374151;letter-spacing:.01em}
     /* 必須／任意バッジ */
     .fss-req,.fss-opt{font-size:11px;font-weight:700;border-radius:4px;padding:4px 7px;line-height:1;margin-left:8px;display:inline-flex;align-items:center;vertical-align:middle;letter-spacing:.02em;white-space:nowrap;flex:0 0 auto}
     .fss-req{background:var(--fss-badge-bg);color:#fff}
@@ -1026,7 +1026,7 @@ function fss_shortcode($atts = array()) {
     .fss-resume span{color:var(--fss-muted);font-size:14px}
 
     /* セクション見出し（メリハリ） */
-    .fss-section{display:flex;align-items:center;font-weight:800;font-size:17px;color:var(--fss-ink);margin:32px 0 4px;padding-left:11px;border-left:4px solid var(--fss-brand);line-height:1.5}
+    .fss-section{display:flex;align-items:center;font-weight:800;font-size:21px;color:var(--fss-ink);margin:34px 0 10px;padding-left:12px;border-left:5px solid var(--fss-brand);line-height:1.45;letter-spacing:.01em}
     .fss-form > .fss-section:first-child{margin-top:0}
 
     .fss-wrap input,.fss-wrap select{width:100%;padding:14px 15px;border:1px solid #cbd5e1;border-radius:9px;font-size:18px;background:#fff;box-sizing:border-box;transition:border-color .15s,box-shadow .15s}
@@ -1038,7 +1038,7 @@ function fss_shortcode($atts = array()) {
     .fss-field.fss-full{grid-column:1/-1}
     .fss-field > label:first-child{margin-top:16px}
     @media(max-width:560px){.fss-group{grid-template-columns:1fr}}
-    .fss-hint{color:var(--fss-muted);font-size:15px;margin-top:5px;line-height:1.7}
+    .fss-hint{color:var(--fss-muted);font-size:14px;margin-top:5px;line-height:1.7}
     .fss-check{display:flex;gap:9px;align-items:flex-start;margin-top:14px}
     .fss-check input{width:auto;margin-top:6px;transform:scale(1.2)}.fss-check label{margin:0;font-weight:400;font-size:16px}
     .fss-wrap button{margin-top:24px;width:100%;background:var(--fss-brand);color:var(--fss-btn-text);border:0;border-radius:10px;padding:18px;font-size:20px;font-weight:700;cursor:pointer}
@@ -1236,7 +1236,7 @@ function fss_shortcode($atts = array()) {
 
 <script>
 (function(){
-  var CITIES = <?php echo $cities_json; ?>;
+  var CITIES = <?php echo $teaser ? $cities_json : '{}'; ?>;   /* 市区町村マスタは都道府県セレクトがある時だけ（受付フォームは住所テキスト入力なので不要＝約60KB削減） */
   var AJAX = <?php echo wp_json_encode($ajax); ?>;
   var NONCE = <?php echo wp_json_encode($nonce); ?>;
   var WRAP_ID = <?php echo wp_json_encode($uid); ?>;
