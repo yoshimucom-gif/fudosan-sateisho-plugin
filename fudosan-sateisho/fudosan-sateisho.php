@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.2.0
+ * Version: 1.3.0
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.2.0');
+define('FSS_VER', '1.3.0');
 define('FSS_OPT', 'fudosan_sateisho_options');
 define('FSS_ENDPOINT', 'https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001');
 
@@ -488,6 +488,50 @@ function fss_leads_page() {
 }
 
 /* CSVエクスポート（Excel向けShift_JIS） */
+/* =========================================================================
+ * 濫用対策（メール爆撃の踏み台にされると送信ドメインのレピュテーションが死ぬ）
+ * ※ nonce は未ログインだと全訪問者で同一値・最大24時間有効のため、ボット対策にならない。
+ * ======================================================================= */
+
+/** 送信元IP。CDN配下で全員が同一IP扱いになるのを避けるため標準ヘッダを優先する。
+ *  偽装可能だが、本命の防御はメールアドレス単位の制限（爆撃したい宛先は固定のため）。 */
+function fss_client_ip() {
+    foreach (array('HTTP_CF_CONNECTING_IP', 'HTTP_X_REAL_IP', 'HTTP_X_FORWARDED_FOR') as $h) {
+        if (!empty($_SERVER[$h])) {
+            $parts = explode(',', $_SERVER[$h]);
+            $ip = trim($parts[0]);
+            if (filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
+        }
+    }
+    return isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0';
+}
+
+function fss_rate_ok($bucket, $id, $limit, $window) {
+    if ($id === '') return true;
+    $k = 'fss_rl_' . $bucket . '_' . md5(strtolower($id));
+    $n = (int) get_transient($k);
+    if ($n >= $limit) return false;
+    set_transient($k, $n + 1, $window);
+    return true;
+}
+
+function fss_rl_limits() {
+    return array(
+        'ip_max'       => (int) apply_filters('fss_rl_ip_max', 5),                 // 同一IP: 1時間に5件
+        'ip_window'    => (int) apply_filters('fss_rl_ip_window', HOUR_IN_SECONDS),
+        'email_max'    => (int) apply_filters('fss_rl_email_max', 3),              // 同一メール: 24時間に3件
+        'email_window' => (int) apply_filters('fss_rl_email_window', DAY_IN_SECONDS),
+    );
+}
+
+/** ハニーポットと経過時間でボットを弾く。JSでfetch送信するため fss_elapsed は必ず入る。 */
+function fss_bot_errors() {
+    if (!empty($_POST['fss_website'])) return array('送信を受け付けられませんでした。');
+    $elapsed = isset($_POST['fss_elapsed']) ? intval($_POST['fss_elapsed']) : 0;
+    if ($elapsed < 3000) return array('入力が早すぎます。もう一度お試しください。');
+    return array();
+}
+
 /**
  * CSVインジェクション対策。= + - @ 等で始まるセルは Excel が数式として実行してしまうため、
  * 先頭に ' を付けて無害な文字列にする（お客様の自由入力がそのままCSVに入るため必須）。
@@ -860,6 +904,16 @@ add_action('wp_ajax_nopriv_fudosan_sateisho', 'fss_ajax');
 function fss_ajax() {
     check_ajax_referer('fudosan_sateisho', 'nonce');
 
+    // ボット・自動送信を先に弾く（DB・メールに一切触らせない）
+    $bot = fss_bot_errors();
+    if ($bot) wp_send_json(array('ok' => false, 'errors' => $bot));
+
+    $lim = fss_rl_limits();
+    if (!fss_rate_ok('ip', fss_client_ip(), $lim['ip_max'], $lim['ip_window'])) {
+        wp_send_json(array('ok' => false, 'errors' => array(
+            '送信が集中しています。しばらく時間をおいてからお試しください。')));
+    }
+
     $ptype   = sanitize_text_field($_POST['ptype'] ?? '');
     $address = sanitize_text_field($_POST['address'] ?? '');
     $email   = sanitize_email($_POST['email'] ?? '');
@@ -897,6 +951,12 @@ function fss_ajax() {
         }
     }
     if ($errors) wp_send_json(array('ok' => false, 'errors' => $errors));
+
+    // ★本命の防御：同一アドレス宛の連続送信を止める（第三者のアドレスを入れての爆撃対策）
+    if (!fss_rate_ok('email', $email, $lim['email_max'], $lim['email_window'])) {
+        wp_send_json(array('ok' => false, 'errors' => array(
+            'このメールアドレスでのお申し込みが続いています。24時間ほどおいてからお試しください。')));
+    }
 
     $label = $GLOBALS['FSS_PTYPE_LABEL'][$ptype];
     if ($note !== '') $detail_lines[] = '■ 備考 : ' . $note;
@@ -1080,6 +1140,8 @@ function fss_shortcode($atts = array()) {
     .fss-wrap button:hover{filter:brightness(.93)}
     .fss-wrap button:disabled{opacity:.6;cursor:wait;filter:none}
     .fss-disc{background:#fff8e6;border:1px solid #f0e0a8;border-radius:10px;padding:15px 17px;font-size:14px;color:#6b5a12;margin-top:18px}
+    /* ハニーポット：display:none だと一部のボットに読まれるため画面外へ逃がす */
+    .fss-hp{position:absolute!important;left:-9999px!important;top:auto;width:1px;height:1px;overflow:hidden}
     .fss-err{background:#fdecea;border:1px solid #f5c6cb;color:#c0392b;padding:10px 12px;border-radius:9px;margin-bottom:10px;font-size:16px}
     .fss-price{font-size:34px;font-weight:800;color:var(--fss-brand);text-align:center;margin:8px 0}
     .fss-mid{text-align:center;color:var(--fss-muted);font-size:16px}
@@ -1188,6 +1250,11 @@ function fss_shortcode($atts = array()) {
       <div class="fss-coverage"></div>
 <?php else: ?>
     <form class="fss-form" id="fss-form">
+      <?php /* ボット対策。人には見えず、自動入力ツールだけが埋める欄 */ ?>
+      <div class="fss-hp" aria-hidden="true">
+        <label for="fss-website">ウェブサイト（入力しないでください）</label>
+        <input type="text" name="fss_website" id="fss-website" tabindex="-1" autocomplete="off">
+      </div>
 <?php if ($show_purpose): ?>
       <div class="fss-section">ご利用目的</div>
       <label>どのようなご事情ですか<span class="fss-opt">任意</span></label>
@@ -1274,6 +1341,7 @@ function fss_shortcode($atts = array()) {
   var CITIES = <?php echo $teaser ? $cities_json : '{}'; ?>;   /* 市区町村マスタは都道府県セレクトがある時だけ（受付フォームは住所テキスト入力なので不要＝約60KB削減） */
   var AJAX = <?php echo wp_json_encode($ajax); ?>;
   var NONCE = <?php echo wp_json_encode($nonce); ?>;
+  var LOADED_AT = Date.now();   // ページキャッシュがあってもJS側で計測すれば正しく効く
   var WRAP_ID = <?php echo wp_json_encode($uid); ?>;
   var TEASER = <?php echo $teaser ? 'true' : 'false'; ?>;
   var TARGET = <?php echo wp_json_encode($target); ?>;
@@ -1444,6 +1512,7 @@ function fss_shortcode($atts = array()) {
     var fd = new FormData(form);
     fd.append('action', 'fudosan_sateisho');
     fd.append('nonce', NONCE);
+    fd.append('fss_elapsed', String(Date.now() - LOADED_AT));   // 表示から送信までの経過ms（ボット判定）
 
     fetch(AJAX, { method:'POST', body: fd, credentials:'same-origin' })
       .then(function(r){ return r.json(); })
