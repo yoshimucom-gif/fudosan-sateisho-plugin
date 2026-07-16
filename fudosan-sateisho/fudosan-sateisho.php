@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.1.4
+ * Version: 1.2.0
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.1.4');
+define('FSS_VER', '1.2.0');
 define('FSS_OPT', 'fudosan_sateisho_options');
 define('FSS_ENDPOINT', 'https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001');
 
@@ -488,6 +488,17 @@ function fss_leads_page() {
 }
 
 /* CSVエクスポート（Excel向けShift_JIS） */
+/**
+ * CSVインジェクション対策。= + - @ 等で始まるセルは Excel が数式として実行してしまうため、
+ * 先頭に ' を付けて無害な文字列にする（お客様の自由入力がそのままCSVに入るため必須）。
+ * 数値（-5 等）はそのまま通す。
+ */
+function fss_csv_safe($s) {
+    $s = (string)$s;
+    if ($s === '' || is_numeric($s)) return $s;
+    return (strpos("=+-@\t\r", $s[0]) !== false) ? "'" . $s : $s;
+}
+
 add_action('admin_post_fss_export_leads', 'fss_export_leads');
 function fss_export_leads() {
     if (!current_user_can('manage_options')) wp_die('権限がありません');
@@ -507,7 +518,7 @@ function fss_export_leads() {
         foreach ($cols as $c) {
             $v = isset($r[$c]) ? $r[$c] : '';
             if ($c === 'ptype' && isset($GLOBALS['FSS_PTYPE_LABEL'][$v])) $v = $GLOBALS['FSS_PTYPE_LABEL'][$v];
-            $line[] = $sjis($v);
+            $line[] = $sjis(fss_csv_safe($v));
         }
         fputcsv($out, $line);
     }
@@ -792,7 +803,28 @@ function fss_mail_body($ctx) {
     // 未設定の項目で「お問い合わせ: 」のようにラベルだけが残らないよう、その行ごと落とす
     if (trim($repl['{operator_contact}']) === '') $tmpl = preg_replace('/^.*\{operator_contact\}.*\R?/m', '', $tmpl);
     if (trim($repl['{operator_name}'])    === '') $tmpl = preg_replace('/^\h*\{operator_name\}\h*\R?/m', '', $tmpl);
-    return rtrim(strtr($tmpl, $repl)) . "\n";
+    return fss_with_disclaimer(rtrim(strtr($tmpl, $repl)));
+}
+
+/**
+ * 免責文は「鑑定評価ではない」ことを示す法的に必須の文面。
+ * 本文テンプレートは管理画面で自由に編集できるため、テンプレート内に免責を置くと
+ * 編集した瞬間に消えてしまう。よって★テンプレートの外で必ず連結する。
+ * （既に免責を含むテンプレートには二重に付けない）
+ */
+function fss_legal_disclaimer() {
+    return "───────────────────────────────\n"
+        . "【ご注意】\n"
+        . "・作成する査定書は宅建業者による『価格査定（参考価格）』であり、\n"
+        . "  不動産鑑定士による『鑑定評価』ではありません。\n"
+        . "・実際の売却価格・成約価格を保証するものではありません。\n"
+        . "───────────────────────────────";
+}
+
+function fss_with_disclaimer($body) {
+    // mbstring が無いサーバーでも動くよう strpos を使う（UTF-8同士の検索は strpos で正しく判定できる）
+    if (strpos($body, '鑑定評価') === false) $body .= "\n\n" . fss_legal_disclaimer();
+    return $body . "\n";
 }
 
 /* 件名テンプレ */

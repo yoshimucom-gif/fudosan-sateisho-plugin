@@ -1,6 +1,6 @@
 {
   "name": "不動産 査定書作成受付",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "download_url": "https://raw.githubusercontent.com/yoshimucom-gif/fudosan-sateisho-plugin/main/fudosan-sateisho.zip",
   "requires": "5.8",
   "tested": "6.7",
@@ -8,6 +8,6 @@
   "author": "ミカタ株式会社",
   "homepage": "https://github.com/yoshimucom-gif/fudosan-sateisho-plugin",
   "sections": {
-    "changelog": "1.1.4\n・運営者情報が未設定のとき、メール末尾に「お問い合わせ:」というラベルだけが残る不具合を修正"
+    "changelog": "1.2.0\n・【重要】メール本文をカスタマイズすると免責文が消せてしまう問題を修正。免責文はテンプレートの外で必ず自動付加します\n・CSVエクスポートの数式インジェクション対策"
   }
 }
