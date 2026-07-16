@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.1.0
+ * Version: 1.1.1
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.1.0');
+define('FSS_VER', '1.1.1');
 define('FSS_OPT', 'fudosan_sateisho_options');
 define('FSS_ENDPOINT', 'https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001');
 
@@ -1160,6 +1160,7 @@ function fss_shortcode($atts = array()) {
       <div class="fss-section">物件の情報</div>
       <label>物件種別<span class="fss-req">必須</span></label>
       <select name="ptype" id="fss-ptype" required><?php echo $ptype_options; ?></select>
+      <div class="fss-hint">選ぶと、その種別の入力項目が表示されます</div>
 
       <label>物件の住所<span class="fss-req">必須</span></label>
       <input type="text" name="address" placeholder="例：東京都渋谷区〇〇1-2-3" required>
