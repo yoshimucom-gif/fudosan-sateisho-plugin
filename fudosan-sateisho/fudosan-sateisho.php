@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.4.0
+ * Version: 1.5.0
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,9 +13,8 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.4.0');
+define('FSS_VER', '1.5.0');
 define('FSS_OPT', 'fudosan_sateisho_options');
-define('FSS_ENDPOINT', 'https://www.reinfolib.mlit.go.jp/ex-api/external/XIT001');
 
 /**
  * 自動更新の置き場（update.json の URL）。
@@ -48,19 +47,7 @@ function fss_activate() {
         ptype VARCHAR(20) NULL,
         address VARCHAR(255) NULL,
         details LONGTEXT NULL,
-        pref VARCHAR(50) NULL,
-        city VARCHAR(50) NULL,
-        area FLOAT NULL,
-        build_year INT NULL,
-        station_min INT NULL,
-        station_name VARCHAR(100) NULL,
-        floor_plan VARCHAR(30) NULL,
-        district VARCHAR(100) NULL,
         purpose VARCHAR(50) NULL,
-        low BIGINT NULL,
-        mid BIGINT NULL,
-        high BIGINT NULL,
-        sample_size INT NULL,
         marketing_opt_in TINYINT(1) DEFAULT 0,
         PRIMARY KEY  (id)
     ) $charset;";
@@ -148,9 +135,6 @@ function fss_sanitize_options($in) {
         'privacy_url'      => esc_url_raw($in['privacy_url'] ?? ''),
         'terms_url'        => esc_url_raw($in['terms_url'] ?? ''),
         // 表示項目（未送信=チェック外れ=非表示）
-        'show_district'    => !empty($in['show_district']) ? '1' : '',
-        'show_station'     => !empty($in['show_station']) ? '1' : '',
-        'show_floor_plan'  => !empty($in['show_floor_plan']) ? '1' : '',
         'show_build_year'  => !empty($in['show_build_year']) ? '1' : '',
         'show_purpose'     => !empty($in['show_purpose']) ? '1' : '',
         'show_marketing'   => !empty($in['show_marketing']) ? '1' : '',
@@ -235,31 +219,8 @@ function fss_property_fields() {
 }
 
 /* teaser で選べる項目（fields属性で指定）。req=必須扱い */
-function fss_teaser_fields() {
-    return array(
-        'purpose'    => array('label' => 'ご利用目的',   'name' => 'purpose',    'req' => false),
-        'ptype'      => array('label' => '物件種別',     'name' => 'ptype',      'req' => true),
-        'pref'       => array('label' => '都道府県',     'name' => 'pref_code',  'req' => true),
-        'city'       => array('label' => '市区町村',     'name' => 'city_code',  'req' => true),
-        'area'       => array('label' => '面積（㎡）',   'name' => 'area',       'req' => true),
-        'build_year' => array('label' => '築年（西暦）', 'name' => 'build_year', 'req' => false),
-    );
-}
 
 /* fields="ptype,pref,city" を検証済みの順序付きリストに */
-function fss_parse_teaser_fields($raw) {
-    $known = fss_teaser_fields();
-    $out = array();
-    foreach (explode(',', (string)$raw) as $k) {
-        $k = trim($k);
-        if ($k !== '' && isset($known[$k]) && !in_array($k, $out, true)) $out[] = $k;
-    }
-    if (!$out) $out = array('ptype', 'pref', 'city');
-    // 市区町村は都道府県が無いと選べないので、無ければ直前に補う
-    $ci = array_search('city', $out, true);
-    if ($ci !== false && !in_array('pref', $out, true)) array_splice($out, $ci, 0, array('pref'));
-    return $out;
-}
 
 /* #rrggbb → "r,g,b"（ブランド色を rgba() で薄く使うため） */
 function fss_hex_to_rgb($hex) {
@@ -277,15 +238,6 @@ function fss_show($key) {
 }
 
 /* 対象エリアで都道府県を絞る（未設定なら全国）。数値文字列キーは整数化されるため非strict比較 */
-function fss_area_prefs() {
-    $all = fss_prefs();
-    $sel = fss_opt('areas', array());
-    if (empty($sel) || !is_array($sel)) return $all;
-    $sel = array_map('strval', $sel);
-    $out = array();
-    foreach ($all as $code => $name) if (in_array((string)$code, $sel, true)) $out[(string)$code] = $name;
-    return $out ?: $all;
-}
 
 /* 受付完了メールの初期本文（お客様へ・差し込みタグ付き） */
 function fss_default_mail_body() {
@@ -607,240 +559,27 @@ function fss_delete_lead() {
 }
 
 /* =========================================================================
- * 3. 都道府県・市区町村（国交省XIT002より生成した全国マスタ includes/jp-cities.php）
- * ======================================================================= */
-function fss_jp_data() {
-    static $d = null;
-    if ($d === null) {
-        $d = @include __DIR__ . '/includes/jp-cities.php';
-        if (!is_array($d) || empty($d['prefs'])) $d = array('prefs' => array(), 'cities' => array());
-    }
-    return $d;
-}
-function fss_prefs()  { return fss_jp_data()['prefs']; }
-function fss_cities() { return fss_jp_data()['cities']; }
-function fss_city_name($pref, $code) {
-    foreach (fss_cities()[$pref] ?? array() as $c) if ($c[0] === $code) return $c[1];
-    return $code;
-}
-
-/* =========================================================================
- * 4. 査定エンジン（satei.py 移植）
+ * 4. 物件種別の対応表
  * ======================================================================= */
 $GLOBALS['FSS_PTYPE_MAP']   = array('mansion' => '中古マンション等', 'house' => '宅地(土地と建物)', 'land' => '宅地(土地)');
 $GLOBALS['FSS_PTYPE_LABEL'] = array('mansion' => '中古マンション', 'house' => '中古一戸建て（土地＋建物）', 'land' => '土地');
 $GLOBALS['FSS_WAREKI']      = array('令和' => 2018, '平成' => 1988, '昭和' => 1925);
 
-function fss_wareki_to_year($s) {
-    if (!$s) return null;
-    $s = trim($s);
-    if (preg_match('/(令和|平成|昭和)\s*(元|\d+)年?/u', $s, $m)) {
-        $n = ($m[2] === '元') ? 1 : intval($m[2]);
-        return $GLOBALS['FSS_WAREKI'][$m[1]] + $n;
-    }
-    if (preg_match('/(\d{4})/', $s, $m)) return intval($m[1]);
-    return null;
-}
 
-function fss_to_int($s) {
-    if ($s === null || $s === '') return null;
-    if (preg_match('/\d+/', str_replace(',', '', (string)$s), $m)) return intval($m[0]);
-    return null;
-}
 
-function fss_unit_price($rec) {
-    $up = fss_to_int($rec['UnitPrice'] ?? '');
-    if ($up) return floatval($up);
-    $price = fss_to_int($rec['TradePrice'] ?? '');
-    $area  = fss_to_int($rec['Area'] ?? '');
-    if ($price && $area && $area > 0) return $price / $area;
-    return null;
-}
 
-function fss_percentile($sorted, $p) { // $sorted 昇順, $p:0..1（線形補間）
-    $n = count($sorted);
-    if ($n === 0) return 0;
-    if ($n === 1) return $sorted[0];
-    $rank = $p * ($n - 1);
-    $lo = (int)floor($rank); $hi = (int)ceil($rank);
-    if ($lo === $hi) return $sorted[$lo];
-    return $sorted[$lo] + ($rank - $lo) * ($sorted[$hi] - $sorted[$lo]);
-}
 
-function fss_estimate($records, $ptype, $area, $year, $district = '') {
-    $type = $GLOBALS['FSS_PTYPE_MAP'][$ptype] ?? '';
-    $same = array_values(array_filter($records, function ($r) use ($type) {
-        return ($r['Type'] ?? '') === $type;
-    }));
 
-    $filters = array();
-
-    // ⓪ 地区（町名）フィルタ: 指定があり十分な件数があれば同じ地区に絞る（最も効く）
-    if ($district !== '') {
-        $dpool = array_values(array_filter($same, function ($r) use ($district) {
-            return trim($r['DistrictName'] ?? '') === $district;
-        }));
-        if (count($dpool) >= 5) {
-            $same = $dpool;
-            $filters[] = sprintf('地区「%s」の事例', $district);
-        }
-    }
-
-    // ① 面積帯フィルタ（対象±30%→±50%、件数を確保できる範囲で）
-    $pool = $same;
-    foreach (array(0.3, 0.5) as $frac) {
-        $lo = $area * (1 - $frac); $hi = $area * (1 + $frac);
-        $band = array_values(array_filter($same, function ($r) use ($lo, $hi) {
-            $a = fss_to_int($r['Area'] ?? '');
-            return $a !== null && $a >= $lo && $a <= $hi;
-        }));
-        if (count($band) >= 5) {
-            $pool = $band;
-            $filters[] = sprintf('面積が近い事例（%d〜%d㎡）', (int)$lo, (int)$hi);
-            break;
-        }
-    }
-
-    // ② 築年フィルタ（マンション・戸建のみ、±10→±20）
-    if ($year && in_array($ptype, array('mansion', 'house'), true)) {
-        foreach (array(10, 20) as $span) {
-            $near = array_values(array_filter($pool, function ($r) use ($year, $span) {
-                $y = fss_wareki_to_year($r['BuildingYear'] ?? '');
-                return $y !== null && abs($y - $year) <= $span;
-            }));
-            if (count($near) >= 5) {
-                $pool = $near;
-                $filters[] = sprintf('築年が対象（%d年）±%d年の事例', $year, $span);
-                break;
-            }
-        }
-    }
-
-    $units = array();
-    foreach ($pool as $r) {
-        $u = fss_unit_price($r);
-        if ($u !== null && $u > 0) $units[] = $u;
-    }
-
-    if (count($units) < 5) {
-        return array('ok' => false, 'sample_size' => count($units),
-            'reason' => 'この地域・条件に近い取引事例が不足しているため、自動査定ができませんでした。個別査定をご利用ください。');
-    }
-
-    sort($units);
-    $p25 = fss_percentile($units, 0.25);
-    $med = fss_percentile($units, 0.5);
-    $p75 = fss_percentile($units, 0.75);
-
-    $reason = sprintf('周辺の%s成約事例のうち、条件の近い %d件の㎡単価をもとに、四分位（25%%〜75%%）でレンジを算出しました。採用した㎡単価の中央値は約 %s 円/㎡です。',
-        $GLOBALS['FSS_PTYPE_LABEL'][$ptype], count($units), number_format((int)$med));
-    if ($filters) $reason .= '（絞り込み: ' . implode(' ／ ', $filters) . '）';
-
-    return array(
-        'ok' => true,
-        'low' => (int)($p25 * $area), 'mid' => (int)($med * $area), 'high' => (int)($p75 * $area),
-        'unit_mid' => (int)$med, 'sample_size' => count($units), 'reason' => $reason,
-    );
-}
-
-function fss_yen_man($v) { return number_format($v / 10000) . '万円'; }
 
 /* =========================================================================
  * 5. API取得（reinfolib）＋モックフォールバック
  * ======================================================================= */
-function fss_use_mock() {
-    return fss_opt('use_mock') === '1' || fss_opt('api_key') === '';
-}
 
-function fss_fetch_records($city, $year, $quarter) {
-    if (fss_use_mock()) return fss_mock_records($city);
-    $url = add_query_arg(array('year' => $year, 'quarter' => $quarter, 'city' => $city), FSS_ENDPOINT);
-    $res = wp_remote_get($url, array(
-        'timeout' => 15,
-        'headers' => array('Ocp-Apim-Subscription-Key' => fss_opt('api_key')),
-    ));
-    if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) return array();
-    $body = json_decode(wp_remote_retrieve_body($res), true);
-    return (is_array($body) && isset($body['data']) && is_array($body['data'])) ? $body['data'] : array();
-}
 
-function fss_fetch_recent($city, $latest_year, $quarters_back = 8) {
-    $ck = 'fss_recs_' . $city . '_' . $latest_year . '_' . $quarters_back;
-    $cached = get_transient($ck);
-    if (is_array($cached)) return $cached;
-    $recs = array(); $y = $latest_year; $q = 4;
-    for ($i = 0; $i < $quarters_back; $i++) {
-        $recs = array_merge($recs, fss_fetch_records($city, $y, $q));
-        if (--$q === 0) { $q = 4; $y--; }
-    }
-    set_transient($ck, $recs, 12 * HOUR_IN_SECONDS);
-    return $recs;
-}
 
 /* 市区町村内の地区名（町名）を、取引件数の多い順に返す: array(array(name, count), ...) */
-function fss_districts($city) {
-    $recs = fss_fetch_recent($city, intval(date('Y')) - 1, 8);
-    $counts = array();
-    foreach ($recs as $r) {
-        $d = trim($r['DistrictName'] ?? '');
-        if ($d !== '') $counts[$d] = (isset($counts[$d]) ? $counts[$d] : 0) + 1;
-    }
-    arsort($counts);
-    $out = array();
-    foreach ($counts as $name => $c) $out[] = array($name, $c);
-    return $out;
-}
 
-add_action('wp_ajax_fudosan_sateisho_districts', 'fss_ajax_districts');
-add_action('wp_ajax_nopriv_fudosan_sateisho_districts', 'fss_ajax_districts');
-function fss_ajax_districts() {
-    $city = sanitize_text_field($_GET['city'] ?? '');
-    if (!$city) wp_send_json(array('districts' => array(), 'counts' => null));
 
-    $recs = fss_fetch_recent($city, intval(date('Y')) - 1, 8);
-
-    // 地区名（取引件数の多い順）
-    $dc = array();
-    foreach ($recs as $r) {
-        $d = trim($r['DistrictName'] ?? '');
-        if ($d !== '') $dc[$d] = (isset($dc[$d]) ? $dc[$d] : 0) + 1;
-    }
-    arsort($dc);
-    $districts = array();
-    foreach ($dc as $name => $c) $districts[] = array($name, $c);
-
-    // 物件種別ごとの事例数（＝査定できるかの事前判定に使う）
-    $counts = array('mansion' => 0, 'house' => 0, 'land' => 0);
-    foreach ($recs as $r) {
-        $t = $r['Type'] ?? '';
-        foreach ($GLOBALS['FSS_PTYPE_MAP'] as $key => $val) {
-            if ($t === $val) { $counts[$key]++; break; }
-        }
-    }
-    wp_send_json(array('districts' => $districts, 'counts' => $counts));
-}
-
-function fss_mock_records($city) {
-    $seed = ctype_digit(substr($city, -1)) ? intval(substr($city, -1)) : 3;
-    $base = 700000 + $seed * 40000;
-    $recs = array();
-    $man = array(array(70,'令和3年',1.05),array(75,'平成28年',0.98),array(65,'平成22年',0.90),array(80,'令和5年',1.10),
-                 array(72,'平成18年',0.85),array(68,'平成30年',1.00),array(85,'令和1年',1.02),array(60,'平成15年',0.80),
-                 array(70,'平成27年',0.95),array(78,'令和2年',1.08));
-    $dists = array('中央町', '南町', '北町');
-    $i = 0;
-    foreach ($man as $m) {
-        $unit = (int)($base * $m[2]);
-        $recs[] = array('Type'=>'中古マンション等','TradePrice'=>(string)((int)($m[0]*$unit)),'UnitPrice'=>'','Area'=>(string)$m[0],'BuildingYear'=>$m[1],'FloorPlan'=>'3LDK','Structure'=>'ＲＣ','DistrictName'=>$dists[$i++ % 3]);
-    }
-    foreach (array(array(110,'令和2年',42000000),array(130,'平成27年',38000000),array(100,'平成20年',33000000),array(150,'令和4年',52000000),array(120,'平成25年',40000000),array(105,'令和1年',36000000)) as $h) {
-        $recs[] = array('Type'=>'宅地(土地と建物)','TradePrice'=>(string)$h[2],'UnitPrice'=>'','Area'=>(string)$h[0],'BuildingYear'=>$h[1],'Structure'=>'木造','DistrictName'=>$dists[$i++ % 3]);
-    }
-    foreach (array(array(120,28000000),array(140,31000000),array(100,24000000),array(165,37000000),array(110,26000000),array(130,30000000)) as $l) {
-        $recs[] = array('Type'=>'宅地(土地)','TradePrice'=>(string)$l[1],'UnitPrice'=>'','Area'=>(string)$l[0],'BuildingYear'=>'','DistrictName'=>$dists[$i++ % 3]);
-    }
-    return $recs;
-}
 
 /* =========================================================================
  * 6. メール本文
@@ -1035,19 +774,11 @@ add_shortcode('fudosan_sateisho', 'fss_shortcode');
  */
 function fss_shortcode($atts = array()) {
     $a = shortcode_atts(array(
-        'design' => 'default', 'url' => '', 'button' => '', 'title' => '', 'subtitle' => '', 'logo' => '',
-        'note' => '', 'fields' => '',
+        'design' => 'default', 'button' => '',
     ), $atts, 'fudosan_sateisho');
     $design = in_array($a['design'], array('default', 'compact', 'card'), true) ? $a['design'] : 'default';
     $compact = ($design === 'compact');
-    $teaser  = false;   // 査定書受付ではティザー（ステップ）は使わない
-    $target  = esc_url($a['url']);
     $btn     = $a['button'] !== '' ? sanitize_text_field($a['button']) : '査定書の作成を申し込む';
-    $t_title = $a['title'] !== ''    ? sanitize_text_field($a['title'])    : '60秒でかんたん入力！';
-    $t_sub   = $a['subtitle'] !== '' ? sanitize_text_field($a['subtitle']) : '査定結果はメールでお届けします';
-    $t_logo  = $a['logo'] !== ''     ? esc_url($a['logo'])                 : '';
-    $t_note  = $a['note'] !== ''     ? sanitize_text_field($a['note'])     : '';   // teaser下部の注記（既定は非表示）
-    $t_fields = $teaser ? fss_parse_teaser_fields($a['fields']) : array();          // teaserに出す項目
 
     // 装飾（設定画面のデザインタブ）
     $c_brand    = fss_opt('color_brand', '#1f6feb');
@@ -1056,59 +787,19 @@ function fss_shortcode($atts = array()) {
     $c_badge    = fss_opt('color_badge', '#ff5a36');
     $c_brand_rgb = fss_hex_to_rgb($c_brand);
 
-    // compact/teaser は入力を最小限に（compactでは築年は精度のため残す）
-    $show_district   = fss_show('district')   && !$compact && !$teaser;
-    $show_station    = fss_show('station')    && !$compact && !$teaser;
-    $show_floor_plan = fss_show('floor_plan') && !$compact && !$teaser;
-    $show_build_year = fss_show('build_year') && !$teaser;
-    $show_purpose    = fss_show('purpose')    && !$compact && !$teaser;
-    $show_marketing  = fss_show('marketing')  && !$compact && !$teaser;
+    // compact は入力を最小限にする
+    $show_purpose   = fss_show('purpose')   && !$compact;
+    $show_marketing = fss_show('marketing') && !$compact;
 
-    $prefs  = fss_area_prefs();
-    $cities = fss_cities();
     $nonce  = wp_create_nonce('fudosan_sateisho');
 
     $ajax   = admin_url('admin-ajax.php');
     $year   = intval(date('Y'));
 
-    // ステップ1から引き継いだ値（?fss_ptype=&fss_pref=&fss_city=&fss_purpose=&fss_area=&fss_build_year=）を検証
-    $g = function ($k) { return isset($_GET[$k]) ? sanitize_text_field(wp_unslash($_GET[$k])) : ''; };
-    $prefill = array(
-        'ptype'      => $g('fss_ptype'),
-        'pref'       => $g('fss_pref'),
-        'city'       => $g('fss_city'),
-        'purpose'    => $g('fss_purpose'),
-        'area'       => $g('fss_area'),
-        'build_year' => $g('fss_build_year'),
-    );
-    if (!isset($GLOBALS['FSS_PTYPE_MAP'][$prefill['ptype']])) $prefill['ptype'] = '';
-    if (!isset($prefs[$prefill['pref']])) { $prefill['pref'] = ''; $prefill['city'] = ''; }
-    if ($prefill['city'] !== '') {                                   // 市区町村コードが都道府県に属するか
-        $ok = false;
-        foreach (($cities[$prefill['pref']] ?? array()) as $c) { if ($c[0] === $prefill['city']) { $ok = true; break; } }
-        if (!$ok) $prefill['city'] = '';
-    }
-    if ($prefill['purpose'] !== '' && !in_array($prefill['purpose'], fss_purposes(), true)) $prefill['purpose'] = '';
-    if ($prefill['area'] !== '' && (!is_numeric($prefill['area']) || $prefill['area'] <= 0 || $prefill['area'] > 100000)) $prefill['area'] = '';
-    if ($prefill['build_year'] !== '') {
-        $by = intval($prefill['build_year']);
-        $prefill['build_year'] = ($by >= 1950 && $by <= $year) ? (string)$by : '';
-    }
 
-    // 入力ガイド（必須→✓、次の欄を光らせる）の対象
-    if ($teaser) {
-        $reg = fss_teaser_fields();
-        $required_names = array();
-        foreach ($t_fields as $k) if ($reg[$k]['req']) $required_names[] = $reg[$k]['name'];
-    } else {
-        $required_names = array('ptype', 'pref_code', 'city_code', 'area', 'email');
-    }
     $privacy = fss_opt('privacy_url');
     $terms   = fss_opt('terms_url');
 
-    // プレースホルダーは「行動」を示す（ラベルと同じ語を繰り返さない）
-    $pref_options = '<option value="">選択してください</option>';
-    foreach ($prefs as $code => $name) $pref_options .= '<option value="' . esc_attr($code) . '">' . esc_html($name) . '</option>';
 
     $ptype_options = '<option value="">選択してください</option>'
         . '<option value="mansion">中古マンション</option>'
@@ -1122,7 +813,6 @@ function fss_shortcode($atts = array()) {
         $agree_label = $p . 'および' . $t . 'に同意します（必須）';
     }
 
-    $cities_json = wp_json_encode($cities, JSON_UNESCAPED_UNICODE);
     $uid = 'fss-' . uniqid();
 
     ob_start(); ?>
@@ -1138,9 +828,6 @@ function fss_shortcode($atts = array()) {
     .fss-req.fss-done{background:var(--fss-brand);color:#fff;border-radius:50%;width:20px;height:20px;padding:0;font-size:12px;justify-content:center}
 
     /* 引き継ぎ時の「続きはこちらから」バナー */
-    .fss-resume{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;background:rgba(var(--fss-brand-rgb),.07);border:1px solid rgba(var(--fss-brand-rgb),.22);border-left:4px solid var(--fss-brand);border-radius:8px;padding:12px 14px;margin:26px 0 6px;font-size:15px}
-    .fss-resume b{color:var(--fss-brand);font-weight:800}
-    .fss-resume span{color:var(--fss-muted);font-size:14px}
 
     /* セクション見出し（メリハリ） */
     .fss-section{display:flex;align-items:center;font-weight:800;font-size:21px;color:var(--fss-ink);margin:34px 0 10px;padding-left:12px;border-left:5px solid var(--fss-brand);line-height:1.45;letter-spacing:.01em}
@@ -1175,7 +862,6 @@ function fss_shortcode($atts = array()) {
     .fss-spec th,.fss-spec td{border-bottom:1px solid var(--fss-line);padding:12px 10px;text-align:left}
     .fss-spec th{color:var(--fss-muted);font-weight:600;width:38%}
     .fss-ok{color:#0a7d33;font-weight:600;font-size:16px}
-    .fss-coverage{color:var(--fss-muted);font-size:14px;line-height:1.6;margin-top:8px}
 
     /* デザイン: compact / teaser（メインビジュアル横などに収める短い版） */
     .fss-design-compact,.fss-design-teaser{max-width:440px}
@@ -1186,36 +872,16 @@ function fss_shortcode($atts = array()) {
     .fss-design-compact .fss-form .fss-hint,.fss-design-teaser .fss-form .fss-hint{display:none}
     .fss-design-compact .fss-group,.fss-design-teaser .fss-group{grid-template-columns:1fr} /* 幅が狭いので1カラム */
     .fss-design-compact .fss-section{display:none} /* 短くするため見出しは省略 */
-    .fss-design-compact .fss-coverage,.fss-design-teaser .fss-coverage{font-size:13px;margin-top:6px}
     .fss-design-compact .fss-check label{font-size:14px}
     .fss-design-compact .fss-disc{font-size:12px;padding:10px 12px;margin-top:12px}
     .fss-design-compact .fss-price{font-size:28px}
     .fss-design-compact .fss-spec{font-size:15px}
     .fss-design-compact .fss-spec th,.fss-design-compact .fss-spec td{padding:9px 8px}
-    .fss-design-teaser .fss-note{color:var(--fss-muted);font-size:12px;margin-top:10px;line-height:1.6}
 
     /* teaser: ヘッダー */
-    .fss-design-teaser .fss-card{padding:22px 20px}
-    .fss-teaser-head{text-align:center;padding-bottom:14px;margin-bottom:6px;border-bottom:1px solid var(--fss-line)}
-    .fss-teaser-title{font-size:19px;font-weight:800;color:var(--fss-title);line-height:1.4}
-    .fss-teaser-sub{font-size:13px;color:var(--fss-muted);margin-top:4px}
     /* ロゴあり: ロゴ左・テキスト右の横並び */
-    .fss-teaser-head.fss-has-logo{display:flex;align-items:center;gap:12px;text-align:left}
-    .fss-teaser-head.fss-has-logo .fss-teaser-logo{flex:0 0 auto;line-height:0}
-    .fss-teaser-head.fss-has-logo .fss-teaser-logo img{display:block;max-height:56px;max-width:80px;width:auto;height:auto}
-    .fss-teaser-head.fss-has-logo .fss-teaser-texts{flex:1;min-width:0}
-    @media (max-width:380px){
-      .fss-teaser-head.fss-has-logo{flex-direction:column;text-align:center;gap:8px}
-    }
 
     /* teaser: ラベル横並び＋必須バッジ */
-    .fss-design-teaser .fss-trow{display:flex;align-items:center;gap:10px;margin:14px 0}
-    .fss-design-teaser .fss-tlabel{flex:0 0 auto;width:142px;display:flex;align-items:center;gap:6px;font-weight:700;font-size:15px;line-height:1.35}
-    .fss-design-teaser .fss-tfield{flex:1;min-width:0}
-    .fss-design-teaser .fss-tfield select,.fss-design-teaser .fss-tfield input{margin:0}
-    .fss-design-teaser .fss-tlabel .fss-req,.fss-design-teaser .fss-tlabel .fss-opt{margin-left:0}
-    .fss-badge{background:var(--fss-badge-bg);color:#fff;font-size:11px;font-weight:700;border-radius:4px;padding:4px 7px;line-height:1;flex:0 0 auto;white-space:nowrap}
-    .fss-badge.fss-done{background:var(--fss-brand);border-radius:50%;width:21px;height:21px;padding:0;font-size:12px;display:inline-flex;align-items:center;justify-content:center}
 
     /* 次に入力すべき欄をハイライト（全デザイン共通） */
     .fss-wrap select.fss-next,.fss-wrap input.fss-next{border-color:rgba(var(--fss-brand-rgb),.55);animation:fsPulse 1.5s ease-in-out infinite}
@@ -1233,48 +899,6 @@ function fss_shortcode($atts = array()) {
 
   <div class="fss-card fss-form-card" id="fss-form-card">
     <div class="fss-errors" id="fss-errors"></div>
-<?php if ($teaser): ?>
-    <div class="fss-teaser-head<?php echo $t_logo ? ' fss-has-logo' : ''; ?>">
-<?php if ($t_logo): ?>
-      <div class="fss-teaser-logo"><img src="<?php echo esc_url($t_logo); ?>" alt="<?php echo esc_attr(fss_opt('site_name', '')); ?>"></div>
-<?php endif; ?>
-      <div class="fss-teaser-texts">
-        <div class="fss-teaser-title"><?php echo esc_html($t_title); ?></div>
-<?php if ($t_sub !== ''): ?>
-        <div class="fss-teaser-sub"><?php echo esc_html($t_sub); ?></div>
-<?php endif; ?>
-      </div>
-    </div>
-    <form class="fss-form" id="fss-form">
-<?php $reg = fss_teaser_fields(); foreach ($t_fields as $k): $fd = $reg[$k]; ?>
-      <div class="fss-trow">
-        <div class="fss-tlabel"><?php echo esc_html($fd['label']); ?><?php
-            echo $fd['req'] ? '<span class="fss-badge">必須</span>' : '<span class="fss-opt">任意</span>'; ?></div>
-        <div class="fss-tfield">
-<?php if ($k === 'purpose'): ?>
-          <select name="purpose">
-            <option value="">選択してください</option>
-<?php foreach (fss_purposes() as $p): ?>
-            <option value="<?php echo esc_attr($p); ?>"><?php echo esc_html($p); ?></option>
-<?php endforeach; ?>
-          </select>
-<?php elseif ($k === 'ptype'): ?>
-          <select name="ptype" required><?php echo $ptype_options; ?></select>
-<?php elseif ($k === 'pref'): ?>
-          <select class="fss-pref" name="pref_code" id="fss-pref" required><?php echo $pref_options; ?></select>
-<?php elseif ($k === 'city'): ?>
-          <select class="fss-city" name="city_code" id="fss-city" required><option value="">先に都道府県を選択</option></select>
-<?php elseif ($k === 'area'): ?>
-          <input type="number" name="area" step="0.01" min="1" placeholder="例：70" required>
-<?php elseif ($k === 'build_year'): ?>
-          <input type="number" name="build_year" min="1950" max="<?php echo $year; ?>" placeholder="例：2015">
-<?php endif; ?>
-        </div>
-      </div>
-<?php endforeach; ?>
-
-      <div class="fss-coverage"></div>
-<?php else: ?>
     <form class="fss-form" id="fss-form">
       <?php /* ボット対策。人には見えず、自動入力ツールだけが埋める欄 */ ?>
       <div class="fss-hp" aria-hidden="true">
@@ -1332,9 +956,7 @@ function fss_shortcode($atts = array()) {
 
       <label>備考・その他<span class="fss-opt">任意</span></label>
       <textarea name="note_text" rows="2" placeholder="複数の接道がある場合など、補足があればご記入ください"></textarea>
-<?php endif; ?>
 
-<?php if (!$teaser): ?>
       <div class="fss-section">ご連絡先</div>
       <label>結果をお届けするメールアドレス<span class="fss-req">必須</span></label>
       <input type="email" name="email" placeholder="you@example.com" required>
@@ -1351,7 +973,6 @@ function fss_shortcode($atts = array()) {
         <input type="checkbox" name="agree" id="fss-agree" value="1" required>
         <label for="fss-agree"><?php echo $agree_label; ?></label>
       </div>
-<?php endif; ?>
 <?php if ($show_marketing): ?>
       <div class="fss-check">
         <input type="checkbox" name="marketing" id="fss-mkt" value="1">
@@ -1388,14 +1009,10 @@ function fss_shortcode($atts = array()) {
 
 <script>
 (function(){
-  var CITIES = <?php echo $teaser ? $cities_json : '{}'; ?>;   /* 市区町村マスタは都道府県セレクトがある時だけ（受付フォームは住所テキスト入力なので不要＝約60KB削減） */
   var AJAX = <?php echo wp_json_encode($ajax); ?>;
   var NONCE = <?php echo wp_json_encode($nonce); ?>;
   var LOADED_AT = Date.now();   // ページキャッシュがあってもJS側で計測すれば正しく効く
   var WRAP_ID = <?php echo wp_json_encode($uid); ?>;
-  var TEASER = <?php echo $teaser ? 'true' : 'false'; ?>;
-  var TARGET = <?php echo wp_json_encode($target); ?>;
-  var PREFILL = <?php echo wp_json_encode($prefill); ?>;
 
   function init(){
   var wrap = document.getElementById(WRAP_ID);
@@ -1514,47 +1131,12 @@ function fss_shortcode($atts = array()) {
     }, 120);
   }
 
-  // ステップ1（teaser）から引き継いだ値を復元し、市区町村・事例数まで自動で読み込む
-  if (!TEASER && PREFILL) {
-    var hasPrefill = Object.keys(PREFILL).some(function(k){ return !!PREFILL[k]; });
-    ['purpose','area','build_year'].forEach(function(n){
-      var el = form.elements[n];
-      if (el && PREFILL[n]) el.value = PREFILL[n];
-    });
-    if (PREFILL.ptype && ptypeSel) ptypeSel.value = PREFILL.ptype;
-    if (PREFILL.pref && pref) {
-      pref.value = PREFILL.pref;
-      pref.dispatchEvent(new Event('change'));
-      if (PREFILL.city && city) {
-        city.value = PREFILL.city;
-        city.dispatchEvent(new Event('change'));
-      }
-    }
-    updateFormState();
-    if (hasPrefill) {                       // 引き継ぎ時のみ（通常の直アクセスでは動かさない）
-      insertResumeBanner();
-      scrollToFirstEmpty();
-    }
-  }
 
   function esc(s){ var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
 
   form.addEventListener('submit', function(e){
     e.preventDefault();
 
-    // ステップ1（teaser）: 入力値をURLに載せてフル入力フォームへ引き継ぐ
-    if (TEASER) {
-      if (!TARGET) return;
-      var MAP = { ptype:'fss_ptype', pref_code:'fss_pref', city_code:'fss_city',
-                  purpose:'fss_purpose', area:'fss_area', build_year:'fss_build_year' };
-      var p = [];
-      Object.keys(MAP).forEach(function(n){
-        var el = form.elements[n];
-        if (el && el.value) p.push(MAP[n] + '=' + encodeURIComponent(el.value));
-      });
-      window.location.href = TARGET + (TARGET.indexOf('?') >= 0 ? '&' : '?') + p.join('&');
-      return;
-    }
 
     errBox.innerHTML = '';
     btn.disabled = true; btn.textContent = '送信中…';
