@@ -1,6 +1,6 @@
 {
   "name": "不動産 査定書作成受付",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "download_url": "https://raw.githubusercontent.com/yoshimucom-gif/fudosan-sateisho-plugin/main/fudosan-sateisho.zip",
   "requires": "5.8",
   "tested": "6.7",
@@ -8,6 +8,6 @@
   "author": "ミカタ株式会社",
   "homepage": "https://github.com/yoshimucom-gif/fudosan-sateisho-plugin",
   "sections": {
-    "changelog": "1.5.0\n・【安全性】使われていない査定エンジン一式を削除しました。査定書作成は価格を出さない仕様のため元々動いていませんでしたが、内部にAPIキー未設定時はダミーデータで価格を算出する処理が残っており、将来これを有効化すると架空の価格がお客様に出る危険がありました\n・認証なしで外部APIを呼び出せる「地区取得」エンドポイントを削除しました（フォームからは使われていませんでした）\n・使われていないティザー（ステップ入力）機能、全国市区町村データ（約55KB）、対象エリア設定、未使用のデータベース列を削除しました\n※動作は一切変わりません。既存の受付データはそのまま保持されます"
+    "changelog": "1.5.1\n・設定画面「自動返信メール」の説明を修正しました。免責文は本文を自由に書き換えても自動で付く（消えない）仕組みであることを明記しました"
   }
 }
