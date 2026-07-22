@@ -1,6 +1,6 @@
 {
   "name": "不動産 査定書作成受付",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "download_url": "https://raw.githubusercontent.com/yoshimucom-gif/fudosan-sateisho-plugin/main/fudosan-sateisho.zip",
   "requires": "5.8",
   "tested": "6.7",
@@ -8,6 +8,6 @@
   "author": "ミカタ株式会社",
   "homepage": "https://github.com/yoshimucom-gif/fudosan-sateisho-plugin",
   "sections": {
-    "changelog": "1.5.1\n・設定画面「自動返信メール」の説明を修正しました。免責文は本文を自由に書き換えても自動で付く（消えない）仕組みであることを明記しました"
+    "changelog": "1.6.0\n・【重要】WordPressの「自動更新を有効化」をONにしても更新が実行されない不具合を修正しました。更新チェックが管理画面を開いたときしか動かず、バックグラウンド処理（WP-Cron）で動いていなかったためです。今後は自動更新をONにすれば、管理画面を開かなくても更新が適用されます"
   }
 }

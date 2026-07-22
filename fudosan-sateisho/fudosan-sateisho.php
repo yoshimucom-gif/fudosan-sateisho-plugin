@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.5.1
+ * Version: 1.6.0
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.5.1');
+define('FSS_VER', '1.6.0');
 define('FSS_OPT', 'fudosan_sateisho_options');
 
 /**
@@ -25,8 +25,10 @@ define('FSS_OPT', 'fudosan_sateisho_options');
  */
 define('FSS_UPDATE_URL', 'https://raw.githubusercontent.com/yoshimucom-gif/fudosan-sateisho-plugin/main/update.json');
 
-/* 自動更新チェッカー（管理画面のみ・URL未設定なら無効） */
-if (is_admin()) {
+/* 更新チェッカー（URL未設定なら無効）
+   ★is_admin() で囲まないこと。WordPressの自動更新は WP-Cron（管理画面外）で走るため、
+     管理画面限定にすると「自動更新を有効化」をONにしても更新が入らない。 */
+if (is_admin() || (defined('DOING_CRON') && DOING_CRON) || (defined('WP_CLI') && WP_CLI)) {
     require_once __DIR__ . '/includes/plugin-updater.php';
     new FSS_Sateisho_Updater(__FILE__, FSS_UPDATE_URL);
 }
