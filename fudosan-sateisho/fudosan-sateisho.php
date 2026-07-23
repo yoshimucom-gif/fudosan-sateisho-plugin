@@ -2,18 +2,18 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.6.0
+ * Version: 1.7.0
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
  *
- * ★法的注意: スタッフが作成する査定書は宅建業の「価格査定（参考価格）」であり、
+ * ★法的注意: スタッフが作成する査定書は「参考価格の情報提供」であり、
  *   不動産鑑定士の「鑑定評価」ではない。免責文で明示すること。公開前に弁護士等の確認を推奨。
  */
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.6.0');
+define('FSS_VER', '1.7.0');
 define('FSS_OPT', 'fudosan_sateisho_options');
 
 /**
@@ -99,7 +99,6 @@ add_action('admin_notices', function () {
     if (!current_user_can('manage_options')) return;
     $miss = array();
     if (fss_opt('operator_name', '') === '')    $miss[] = '運営者名（会社名）';
-    if (fss_opt('license_no', '') === '')       $miss[] = '宅地建物取引業の免許番号';
     if (fss_opt('operator_contact', '') === '') $miss[] = '問い合わせ先';
     if (fss_opt('privacy_url', '') === '')      $miss[] = 'プライバシーポリシーURL';
     if (!$miss) return;
@@ -131,7 +130,6 @@ function fss_sanitize_options($in) {
         'operator_name'    => sanitize_text_field($in['operator_name'] ?? ''),
         'operator_contact' => sanitize_text_field($in['operator_contact'] ?? ''),
         'operator_address' => sanitize_text_field($in['operator_address'] ?? ''),
-        'license_no'       => sanitize_text_field($in['license_no'] ?? ''),
         'from_email'       => sanitize_email($in['from_email'] ?? get_option('admin_email')),
         'notify_email'     => sanitize_email($in['notify_email'] ?? ''),
         'privacy_url'      => esc_url_raw($in['privacy_url'] ?? ''),
@@ -251,9 +249,10 @@ function fss_default_mail_body() {
         . "いましばらくお待ちください。\n\n"
         . "───────────────────────────────\n"
         . "【ご注意】\n"
-        . "・作成する査定書は宅建業者による『価格査定（参考価格）』であり、\n"
+        . "・作成する査定書は『参考価格の情報提供』であり、\n"
         . "  不動産鑑定士による『鑑定評価』ではありません。\n"
         . "・実際の売却価格・成約価格を保証するものではありません。\n"
+        . "・当社は宅地建物取引業者ではなく、売買の媒介・代理は行いません。\n"
         . "───────────────────────────────\n\n"
         . "{operator_name}\n"
         . "お問い合わせ: {operator_contact}";
@@ -304,8 +303,6 @@ function fss_settings_page() {
                     <p class="description">メールの件名や差し込みに使われます。</p></td></tr>
                 <tr><th>運営者名（会社名）</th><td><input type="text" name="<?php echo FSS_OPT; ?>[operator_name]" value="<?php echo esc_attr(fss_opt('operator_name')); ?>" size="40" placeholder="例：ミカタ株式会社">
                     <p class="description">フォームとメールに表示されます。<strong>お客様が「どこの会社に情報を渡すのか」を判断する材料</strong>なので、必ずご記入ください。</p></td></tr>
-                <tr><th>宅地建物取引業<br>免許番号</th><td><input type="text" name="<?php echo FSS_OPT; ?>[license_no]" value="<?php echo esc_attr(fss_opt('license_no')); ?>" size="40" placeholder="例：岡山県知事免許（1）第○○○○号">
-                    <p class="description">フォームに表示されます。不動産の査定を受け付ける以上、<strong>これが無いとお客様から見て信頼性が大きく下がります</strong>。</p></td></tr>
                 <tr><th>所在地</th><td><input type="text" name="<?php echo FSS_OPT; ?>[operator_address]" value="<?php echo esc_attr(fss_opt('operator_address')); ?>" size="50" placeholder="例：岡山県岡山市北区○○1-2-3"></td></tr>
                 <tr><th>問い合わせ先</th><td><input type="text" name="<?php echo FSS_OPT; ?>[operator_contact]" value="<?php echo esc_attr(fss_opt('operator_contact')); ?>" size="40" placeholder="例：086-000-0000 / info@example.com"></td></tr>
                 <tr><th>送信元メール</th><td><input type="email" name="<?php echo FSS_OPT; ?>[from_email]" value="<?php echo esc_attr(fss_opt('from_email', get_option('admin_email'))); ?>" size="40">
@@ -413,7 +410,7 @@ function fss_settings_page() {
 
             <h3 style="color:#b32d2e">法的な注意</h3>
             <p class="description">
-                作成する査定書は宅建業の<strong>「価格査定（参考価格）」</strong>であり、不動産鑑定士による<strong>「鑑定評価」ではありません</strong>。
+                作成する査定書は<strong>「参考価格の情報提供」</strong>であり、不動産鑑定士による<strong>「鑑定評価」ではありません</strong>。
                 フォーム・メールの免責文でその旨を明示しています。<strong>免責文は削除しないでください。</strong>公開前に弁護士等の確認を推奨します。
             </p>
             </div>
@@ -626,9 +623,10 @@ function fss_mail_body($ctx) {
 function fss_legal_disclaimer() {
     return "───────────────────────────────\n"
         . "【ご注意】\n"
-        . "・作成する査定書は宅建業者による『価格査定（参考価格）』であり、\n"
+        . "・作成する査定書は『参考価格の情報提供』であり、\n"
         . "  不動産鑑定士による『鑑定評価』ではありません。\n"
         . "・実際の売却価格・成約価格を保証するものではありません。\n"
+        . "・当社は宅地建物取引業者ではなく、売買の媒介・代理は行いません。\n"
         . "───────────────────────────────";
 }
 
@@ -990,19 +988,18 @@ function fss_shortcode($atts = array()) {
     </form>
 
     <div class="fss-disc">
-      作成する査定書は宅建業者による<strong>参考価格（価格査定）</strong>であり、不動産鑑定士による<strong>鑑定評価ではありません</strong>。実際の売却価格を保証するものではありません。
+      作成する査定書は<strong>参考価格の情報提供</strong>であり、不動産鑑定士による<strong>鑑定評価ではありません</strong>。実際の売却価格を保証するものではありません。<strong>当社は宅地建物取引業者ではなく、売買の媒介・代理は行いません。</strong>
     </div>
 <?php
     /* 提供元の明示。お客様が「どこの誰に自宅の情報を渡すのか」を判断する材料であり、
        不動産では免許番号の有無が信頼性を大きく左右する。設定済みの項目だけを出す。 */
-    $op_name = fss_opt('operator_name', ''); $op_lic = fss_opt('license_no', '');
+    $op_name = fss_opt('operator_name', '');
     $op_addr = fss_opt('operator_address', ''); $op_tel = fss_opt('operator_contact', '');
-    if ($op_name || $op_lic || $op_addr || $op_tel):
+    if ($op_name || $op_addr || $op_tel):
 ?>
     <div class="fss-operator">
       <div class="fss-operator-t">このサービスの提供元</div>
 <?php if ($op_name): ?>      <div><span>運営</span><?php echo esc_html($op_name); ?></div>
-<?php endif; if ($op_lic): ?>      <div><span>免許番号</span><?php echo esc_html($op_lic); ?></div>
 <?php endif; if ($op_addr): ?>      <div><span>所在地</span><?php echo esc_html($op_addr); ?></div>
 <?php endif; if ($op_tel): ?>      <div><span>お問い合わせ</span><?php echo esc_html($op_tel); ?></div>
 <?php endif; ?>
@@ -1181,7 +1178,7 @@ function fss_shortcode($atts = array()) {
       + '<table class="fss-spec">'+rows+'</table>'
       + det
       + mailLine
-      + '<div class="fss-disc">作成する査定書は宅建業者による<strong>参考価格（価格査定）</strong>であり、不動産鑑定士による<strong>鑑定評価ではありません</strong>。実際の売却価格を保証するものではありません。</div>';
+      + '<div class="fss-disc">作成する査定書は<strong>参考価格の情報提供</strong>であり、不動産鑑定士による<strong>鑑定評価ではありません</strong>。実際の売却価格を保証するものではありません。<strong>当社は宅地建物取引業者ではなく、売買の媒介・代理は行いません。</strong></div>';
     resultCard.innerHTML = html;
     formCard.style.display = 'none';
     resultCard.style.display = 'block';
