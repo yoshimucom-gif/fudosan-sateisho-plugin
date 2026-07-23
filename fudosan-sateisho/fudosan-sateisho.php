@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.8.0
+ * Version: 1.9.0
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.8.0');
+define('FSS_VER', '1.9.0');
 define('FSS_OPT', 'fudosan_sateisho_options');
 
 /**
@@ -135,11 +135,9 @@ function fss_sanitize_options($in) {
         'privacy_url'      => esc_url_raw($in['privacy_url'] ?? ''),
         'terms_url'        => esc_url_raw($in['terms_url'] ?? ''),
         // 表示項目（未送信=チェック外れ=非表示）
-        'show_build_year'  => !empty($in['show_build_year']) ? '1' : '',
         'show_purpose'     => !empty($in['show_purpose']) ? '1' : '',
         'show_marketing'   => !empty($in['show_marketing']) ? '1' : '',
         // 対象エリア（空=全国）
-        'areas'            => $areas,
         // 自動返信メール
         'mail_subject'     => sanitize_text_field($in['mail_subject'] ?? ''),
         'mail_body'        => sanitize_textarea_field($in['mail_body'] ?? ''),
@@ -305,7 +303,7 @@ function fss_settings_page() {
                     <p class="description">フォームとメールに表示されます。<strong>お客様が「どこの会社に情報を渡すのか」を判断する材料</strong>なので、必ずご記入ください。</p></td></tr>
                 <tr><th>所在地</th><td><input type="text" name="<?php echo FSS_OPT; ?>[operator_address]" value="<?php echo esc_attr(fss_opt('operator_address')); ?>" size="50" placeholder="例：岡山県岡山市北区○○1-2-3"></td></tr>
                 <tr><th>問い合わせ先</th><td><input type="text" name="<?php echo FSS_OPT; ?>[operator_contact]" value="<?php echo esc_attr(fss_opt('operator_contact')); ?>" size="40" placeholder="例：086-000-0000 / info@example.com"></td></tr>
-                <tr><th>送信元メール</th><td><input type="email" name="<?php echo FSS_OPT; ?>[from_email]" value="<?php echo esc_attr(fss_opt('from_email', get_option('admin_email'))); ?>" size="40">
+                <tr><th>送信元メール</th><td><input type="email" name="<?php echo FSS_OPT; ?>[from_email]" value="<?php echo esc_attr(fss_opt('from_email')); ?>" size="40" placeholder="<?php echo esc_attr(get_option('admin_email')); ?>">
                     <p class="description">お客様への受付完了メールの差出人。到達率のため WP Mail SMTP 等で SPF/DKIM を設定推奨。</p></td></tr>
                 <tr><th>通知先メール（担当者）</th><td><input type="email" name="<?php echo FSS_OPT; ?>[notify_email]" value="<?php echo esc_attr(fss_opt('notify_email')); ?>" size="40">
                     <p class="description">受付が届いたら、このアドレスに通知します。空欄なら送信元メール（無ければ管理者アドレス）に通知します。</p></td></tr>
@@ -472,6 +470,13 @@ function fss_leads_page() {
 
 /** 送信元IP。CDN配下で全員が同一IP扱いになるのを避けるため標準ヘッダを優先する。
  *  偽装可能だが、本命の防御はメールアドレス単位の制限（爆撃したい宛先は固定のため）。 */
+/* 文字数でDBカラム長に収める（超過するとinsertが失敗してリードが消える） */
+function fss_trim_len($s, $max) {
+    $s = (string)$s;
+    if ($s === '') return $s;
+    return function_exists('mb_substr') ? mb_substr($s, 0, $max) : substr($s, 0, $max);
+}
+
 function fss_client_ip() {
     foreach (array('HTTP_CF_CONNECTING_IP', 'HTTP_X_REAL_IP', 'HTTP_X_FORWARDED_FOR') as $h) {
         if (!empty($_SERVER[$h])) {
@@ -690,10 +695,6 @@ function fss_ajax() {
     if ($bot) wp_send_json(array('ok' => false, 'errors' => $bot));
 
     $lim = fss_rl_limits();
-    if (!fss_rate_ok('ip', fss_client_ip(), $lim['ip_max'], $lim['ip_window'])) {
-        wp_send_json(array('ok' => false, 'errors' => array(
-            '送信が集中しています。しばらく時間をおいてからお試しください。')));
-    }
 
     $ptype   = sanitize_text_field($_POST['ptype'] ?? '');
     $address = sanitize_text_field($_POST['address'] ?? '');
@@ -733,6 +734,13 @@ function fss_ajax() {
     }
     if ($errors) wp_send_json(array('ok' => false, 'errors' => $errors));
 
+    // ★入力内容が正しいときだけ回数を数える。
+    //   入力ミスでも数えると、間違えた正規のお客様が先にブロックされてしまう。
+    if (!fss_rate_ok('ip', fss_client_ip(), $lim['ip_max'], $lim['ip_window'])) {
+        wp_send_json(array('ok' => false, 'errors' => array(
+            '送信が集中しています。しばらく時間をおいてからお試しください。')));
+    }
+
     // ★本命の防御：同一アドレス宛の連続送信を止める（第三者のアドレスを入れての爆撃対策）
     if (!fss_rate_ok('email', $email, $lim['email_max'], $lim['email_window'])) {
         wp_send_json(array('ok' => false, 'errors' => array(
@@ -745,9 +753,10 @@ function fss_ajax() {
 
     // リード保存（受付）
     global $wpdb;
+    // 住所は必須の自由入力。255文字を超えるとinsertが失敗しリードが消えるため丸める
     $row = array(
         'created_at' => current_time('mysql'), 'email' => $email,
-        'ptype' => $ptype, 'address' => $address, 'details' => $details,
+        'ptype' => $ptype, 'address' => fss_trim_len($address, 255), 'details' => $details,
         'purpose' => $purpose, 'marketing_opt_in' => $mkt ? 1 : 0,
     );
     $ins = $wpdb->insert($wpdb->prefix . 'fudosan_sateisho_leads', $row);
@@ -841,6 +850,7 @@ function fss_shortcode($atts = array()) {
     .fss-wrap{--fss-brand:<?php echo esc_attr($c_brand); ?>;--fss-brand-rgb:<?php echo esc_attr($c_brand_rgb); ?>;--fss-btn-text:<?php echo esc_attr($c_btn_text); ?>;--fss-title:<?php echo esc_attr($c_title); ?>;--fss-badge-bg:<?php echo esc_attr($c_badge); ?>;--fss-ink:#1a1f36;--fss-muted:#6b7280;--fss-line:#e5e7eb;width:100%;max-width:none;margin:0;color:var(--fss-ink);font-family:inherit;line-height:1.75;font-size:17px}
     /* 最後の要素（免責など）で切れると窮屈に見えるので、フォーム・結果とも下に余白を持たせる */
     .fss-card{background:transparent;border:0;border-radius:0;padding:0 0 28px}
+    .fss-wrap{overflow-wrap:anywhere}   /* 長いメールアドレスや住所で横スクロールさせない */
     .fss-card > :last-child{margin-bottom:0}
     .fss-wrap label{display:block;font-weight:700;margin:18px 0 7px;font-size:17px;color:#374151;letter-spacing:.01em}
     /* 必須／任意バッジ */
@@ -855,8 +865,8 @@ function fss_shortcode($atts = array()) {
     .fss-section{display:flex;align-items:center;font-weight:800;font-size:21px;color:var(--fss-ink);margin:34px 0 10px;padding-left:12px;border-left:5px solid var(--fss-brand);line-height:1.45;letter-spacing:.01em}
     .fss-form > .fss-section:first-child{margin-top:0}
 
-    .fss-wrap input,.fss-wrap select{width:100%;padding:14px 15px;border:1px solid #cbd5e1;border-radius:9px;font-size:18px;background:#fff;box-sizing:border-box;transition:border-color .15s,box-shadow .15s}
-    .fss-wrap input:focus,.fss-wrap select:focus{outline:none;border-color:var(--fss-brand);box-shadow:0 0 0 3px rgba(var(--fss-brand-rgb),.15)}
+    .fss-wrap input,.fss-wrap select,.fss-wrap textarea{width:100%;padding:14px 15px;border:1px solid #cbd5e1;border-radius:9px;font-size:18px;background:#fff;box-sizing:border-box;transition:border-color .15s,box-shadow .15s}
+    .fss-wrap input:focus,.fss-wrap select:focus,.fss-wrap textarea:focus{outline:none;border-color:var(--fss-brand);box-shadow:0 0 0 3px rgba(var(--fss-brand-rgb),.15)}
     .fss-row{display:flex;gap:12px}.fss-row>div{flex:1}
     /* 種別項目は2カラムでコンパクトに（textarea・チェックは全幅） */
     .fss-group{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;align-items:start}
@@ -889,7 +899,7 @@ function fss_shortcode($atts = array()) {
     .fss-design-compact,.fss-design-teaser{max-width:440px}
     .fss-design-compact .fss-card,.fss-design-teaser .fss-card{background:#fff;border:1px solid var(--fss-line);border-radius:14px;padding:20px 18px;box-shadow:0 8px 28px rgba(16,24,40,.10)}
     .fss-design-compact label,.fss-design-teaser label{font-size:16px;margin:12px 0 5px}
-    .fss-design-compact input,.fss-design-compact select,.fss-design-teaser input,.fss-design-teaser select{padding:11px 12px;font-size:16px}
+    .fss-design-compact input,.fss-design-compact select,.fss-design-compact textarea,.fss-design-teaser input,.fss-design-teaser select{padding:11px 12px;font-size:16px}
     .fss-design-compact button,.fss-design-teaser button{margin-top:16px;padding:14px;font-size:17px}
     .fss-design-compact .fss-form .fss-hint,.fss-design-teaser .fss-form .fss-hint{display:none}
     .fss-design-compact .fss-group,.fss-design-teaser .fss-group{grid-template-columns:1fr} /* 幅が狭いので1カラム */
@@ -1140,6 +1150,12 @@ function fss_shortcode($atts = array()) {
   });
 
   switchType(); // 初期表示（種別グループ反映＋ガイド）
+  /* ブラウザバック等でブラウザが種別を復元しても change は発火しないため、
+     「中古マンションと表示されているのに入力欄が出ない」状態になる。読み込み時と
+     bfcache 復帰時に自前で反映し直す。 */
+  setTimeout(switchType, 0);
+  setTimeout(switchType, 250);
+  window.addEventListener('pageshow', function(e){ if (e.persisted) switchType(); });
 
   // 引き継ぎで来たときは、最初の未入力欄（＝光っている欄）まで自動スクロール
   function scrollToFirstEmpty(){
@@ -1189,7 +1205,17 @@ function fss_shortcode($atts = array()) {
     send(false)
       .then(function(d){
         btn.disabled = false; btn.textContent = SUBMIT_LABEL;
-        if (d.errors) { errBox.innerHTML = d.errors.map(function(x){return '<div class="fss-err">'+esc(x)+'</div>';}).join(''); return; }
+        /* ★応答が正しい形か必ず確かめる。
+           admin-ajax は失敗時に -1 や 0 という「JSONとして解釈できてしまう値」を返す。
+           素通しすると、1件も保存されていないのに「受け付けました」と表示してしまう。 */
+        if (!d || typeof d !== 'object' || (d.ok !== true && !d.errors)) {
+          throw new Error('bad-response');
+        }
+        if (d.errors) {
+        errBox.innerHTML = d.errors.map(function(x){return '<div class="fss-err">'+esc(x)+'</div>';}).join('');
+        errBox.scrollIntoView({ behavior:'smooth', block:'center' });   // 画面外だと「無反応」に見えて連打される
+        return;
+      }
         renderResult(d);
       })
       .catch(function(){
