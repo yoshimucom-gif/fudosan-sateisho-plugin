@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.7.2
+ * Version: 1.8.0
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.7.2');
+define('FSS_VER', '1.8.0');
 define('FSS_OPT', 'fudosan_sateisho_options');
 
 /**
@@ -664,6 +664,22 @@ function fss_test_mail() {
 /* =========================================================================
  * 7. AJAX（admin-ajax 経由。REST無効化環境でも動く）
  * ======================================================================= */
+/**
+ * 新しいnonceを配る。
+ * ページキャッシュが効いていると、HTMLに焼き込まれたnonceが古いまま配られ続け、
+ * 24時間で失効した後は全員の送信が失敗する。JS側がこれを呼んで取り直せるようにする。
+ * ※未ログイン用のnonceは元々ページを開けば誰でも取得できるため、公開しても強度は変わらない。
+ */
+add_action('wp_ajax_fudosan_sateisho_nonce', 'fss_ajax_nonce');
+add_action('wp_ajax_nopriv_fudosan_sateisho_nonce', 'fss_ajax_nonce');
+function fss_ajax_nonce() {
+    if (!headers_sent()) {
+        header('Cache-Control: no-cache, no-store, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+    }
+    wp_send_json(array('nonce' => wp_create_nonce('fudosan_sateisho')));
+}
+
 add_action('wp_ajax_fudosan_sateisho', 'fss_ajax');
 add_action('wp_ajax_nopriv_fudosan_sateisho', 'fss_ajax');
 function fss_ajax() {
@@ -1151,8 +1167,26 @@ function fss_shortcode($atts = array()) {
     fd.append('nonce', NONCE);
     fd.append('fss_elapsed', String(Date.now() - LOADED_AT));   // 表示から送信までの経過ms（ボット判定）
 
-    fetch(AJAX, { method:'POST', body: fd, credentials:'same-origin' })
-      .then(function(r){ return r.json(); })
+    /* ページキャッシュで古いnonceが配られていると 403 になる。
+       その場合だけ新しいnonceを取り直して1回だけ送り直す。 */
+    function send(retried){
+      fd.set('nonce', NONCE);
+      return fetch(AJAX, { method:'POST', body: fd, credentials:'same-origin' })
+        .then(function(r){
+          if (r.status === 403 && !retried) {
+            return fetch(AJAX + '?action=fudosan_sateisho_nonce', { credentials:'same-origin' })
+              .then(function(x){ return x.json(); })
+              .then(function(n){
+                if (!n || !n.nonce) throw new Error('nonce');
+                NONCE = n.nonce;
+                return send(true);
+              });
+          }
+          return r.json();
+        });
+    }
+
+    send(false)
       .then(function(d){
         btn.disabled = false; btn.textContent = SUBMIT_LABEL;
         if (d.errors) { errBox.innerHTML = d.errors.map(function(x){return '<div class="fss-err">'+esc(x)+'</div>';}).join(''); return; }
