@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.9.0
+ * Version: 1.9.1
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.9.0');
+define('FSS_VER', '1.9.1');
 define('FSS_OPT', 'fudosan_sateisho_options');
 
 /**
@@ -934,8 +934,8 @@ function fss_shortcode($atts = array()) {
     <form class="fss-form" id="fss-form">
       <?php /* ボット対策。人には見えず、自動入力ツールだけが埋める欄 */ ?>
       <div class="fss-hp" aria-hidden="true">
-        <label for="fss-website">ウェブサイト（入力しないでください）</label>
-        <input type="text" name="fss_website" id="fss-website" tabindex="-1" autocomplete="off">
+        <label for="<?php echo esc_attr($uid . '-website'); ?>">ウェブサイト（入力しないでください）</label>
+        <input type="text" name="fss_website" id="<?php echo esc_attr($uid . '-website'); ?>" tabindex="-1" autocomplete="off">
       </div>
 <?php if ($show_purpose): ?>
       <div class="fss-section">ご利用目的</div>
@@ -1002,13 +1002,13 @@ function fss_shortcode($atts = array()) {
       </div>
 
       <div class="fss-check">
-        <input type="checkbox" name="agree" id="fss-agree" value="1" required>
-        <label for="fss-agree"><?php echo $agree_label; ?></label>
+        <input type="checkbox" name="agree" id="<?php echo esc_attr($uid . '-agree'); ?>" value="1" required>
+        <label for="<?php echo esc_attr($uid . '-agree'); ?>"><?php echo $agree_label; ?></label>
       </div>
 <?php if ($show_marketing): ?>
       <div class="fss-check">
-        <input type="checkbox" name="marketing" id="fss-mkt" value="1">
-        <label for="fss-mkt">売却に関するご提案・お役立ち情報のメール受け取りを希望します（任意）</label>
+        <input type="checkbox" name="marketing" id="<?php echo esc_attr($uid . '-mkt'); ?>" value="1">
+        <label for="<?php echo esc_attr($uid . '-mkt'); ?>">売却に関するご提案・お役立ち情報のメール受け取りを希望します（任意）</label>
       </div>
 <?php endif; ?>
 
