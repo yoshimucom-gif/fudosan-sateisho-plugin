@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.7.1
+ * Version: 1.7.2
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.7.1');
+define('FSS_VER', '1.7.2');
 define('FSS_OPT', 'fudosan_sateisho_options');
 
 /**
@@ -823,10 +823,9 @@ function fss_shortcode($atts = array()) {
 <div class="fss-wrap fss-design-<?php echo esc_attr($design); ?>" id="<?php echo esc_attr($uid); ?>">
   <style>
     .fss-wrap{--fss-brand:<?php echo esc_attr($c_brand); ?>;--fss-brand-rgb:<?php echo esc_attr($c_brand_rgb); ?>;--fss-btn-text:<?php echo esc_attr($c_btn_text); ?>;--fss-title:<?php echo esc_attr($c_title); ?>;--fss-badge-bg:<?php echo esc_attr($c_badge); ?>;--fss-ink:#1a1f36;--fss-muted:#6b7280;--fss-line:#e5e7eb;width:100%;max-width:none;margin:0;color:var(--fss-ink);font-family:inherit;line-height:1.75;font-size:17px}
-    .fss-card{background:transparent;border:0;border-radius:0;padding:0}
-    /* 結果カードは最後の要素で切れると窮屈に見えるので、下に余白を持たせる */
-    .fss-result{padding-bottom:28px}
-    .fss-result > :last-child{margin-bottom:0}
+    /* 最後の要素（免責など）で切れると窮屈に見えるので、フォーム・結果とも下に余白を持たせる */
+    .fss-card{background:transparent;border:0;border-radius:0;padding:0 0 28px}
+    .fss-card > :last-child{margin-bottom:0}
     .fss-wrap label{display:block;font-weight:700;margin:18px 0 7px;font-size:17px;color:#374151;letter-spacing:.01em}
     /* 必須／任意バッジ */
     .fss-req,.fss-opt{font-size:11px;font-weight:700;border-radius:4px;padding:4px 7px;line-height:1;margin-left:8px;display:inline-flex;align-items:center;vertical-align:middle;letter-spacing:.02em;white-space:nowrap;flex:0 0 auto}
