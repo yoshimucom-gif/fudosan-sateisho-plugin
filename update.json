@@ -1,6 +1,6 @@
 {
   "name": "不動産 査定書作成受付",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "download_url": "https://raw.githubusercontent.com/yoshimucom-gif/fudosan-sateisho-plugin/main/fudosan-sateisho.zip",
   "requires": "5.8",
   "tested": "6.7",
@@ -8,6 +8,6 @@
   "author": "ミカタ株式会社",
   "homepage": "https://github.com/yoshimucom-gif/fudosan-sateisho-plugin",
   "sections": {
-    "changelog": "1.9.1\n・同じページにフォームを2つ設置した場合、2つ目のフォームで「同意します」のチェックが入らず送信できない問題を修正しました"
+    "changelog": "1.9.2\n・送信ボタンやEnterキーの連打による二重申し込み（同じお客様の受付が複数登録され、通知メールが何通も届く）を防止しました\n・受付データの保存に失敗したのに「受付完了」と表示してしまう不具合を修正しました（失敗時はエラーを表示し、再送信をご案内します）\n・同じページに複数のフォームを設置した場合に、チェックボックスの内部IDが重複する問題を修正しました"
   }
 }

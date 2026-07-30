@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.9.1
+ * Version: 1.9.2
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.9.1');
+define('FSS_VER', '1.9.2');
 define('FSS_OPT', 'fudosan_sateisho_options');
 
 /**
@@ -761,12 +761,19 @@ function fss_ajax() {
     );
     $ins = $wpdb->insert($wpdb->prefix . 'fudosan_sateisho_leads', $row);
     if ($ins === false) {
+        // 1回目失敗：不足カラムを補ってからもう一度だけ試す
         update_option('fss_last_db_error', $wpdb->last_error . ' @ ' . current_time('mysql'));
         fss_ensure_columns();
-        $wpdb->insert($wpdb->prefix . 'fudosan_sateisho_leads', $row);
-    } else {
-        delete_option('fss_last_db_error');
+        $ins = $wpdb->insert($wpdb->prefix . 'fudosan_sateisho_leads', $row);
     }
+    if ($ins === false) {
+        // リトライも失敗：受付できていないので「完了」と偽らず、メールも送らずにエラーを返す
+        update_option('fss_last_db_error', $wpdb->last_error . ' @ ' . current_time('mysql'));
+        wp_send_json(array('ok' => false, 'errors' => array(
+            '申し訳ありません。ただいま受付処理でエラーが発生しました。お手数ですが時間をおいて再度お試しください。',
+        )));
+    }
+    delete_option('fss_last_db_error');   // 初回・リトライを問わず、保存に成功したらエラー記録を消す
 
     $ctx = array(
         'ptype_label' => $label, 'address' => $address, 'details' => $details, 'purpose' => $purpose,
@@ -929,9 +936,9 @@ function fss_shortcode($atts = array()) {
     .fss-design-card .fss-card{background:#fff;border:1px solid var(--fss-line);border-radius:14px;padding:24px 22px;box-shadow:0 4px 18px rgba(16,24,40,.06)}
   </style>
 
-  <div class="fss-card fss-form-card" id="fss-form-card">
-    <div class="fss-errors" id="fss-errors"></div>
-    <form class="fss-form" id="fss-form">
+  <div class="fss-card fss-form-card">
+    <div class="fss-errors"></div>
+    <form class="fss-form">
       <?php /* ボット対策。人には見えず、自動入力ツールだけが埋める欄 */ ?>
       <div class="fss-hp" aria-hidden="true">
         <label for="<?php echo esc_attr($uid . '-website'); ?>">ウェブサイト（入力しないでください）</label>
@@ -950,7 +957,7 @@ function fss_shortcode($atts = array()) {
 
       <div class="fss-section">物件の情報</div>
       <label>物件種別<span class="fss-req">必須</span></label>
-      <select name="ptype" id="fss-ptype" required><?php echo $ptype_options; ?></select>
+      <select name="ptype" required><?php echo $ptype_options; ?></select>
       <div class="fss-hint">選ぶと、その種別の入力項目が表示されます</div>
 
       <label>物件の住所<span class="fss-req">必須</span></label>
@@ -963,8 +970,8 @@ function fss_shortcode($atts = array()) {
         <div class="fss-field<?php echo $full ? ' fss-full' : ''; ?>">
 <?php if ($fd['type'] === 'check'): ?>
           <div class="fss-check">
-            <input type="checkbox" name="<?php echo esc_attr($nm); ?>" id="<?php echo esc_attr($nm); ?>" value="1">
-            <label for="<?php echo esc_attr($nm); ?>"><?php echo esc_html($fd['chk']); ?></label>
+            <input type="checkbox" name="<?php echo esc_attr($nm); ?>" id="<?php echo esc_attr($uid . '-' . $nm); ?>" value="1">
+            <label for="<?php echo esc_attr($uid . '-' . $nm); ?>"><?php echo esc_html($fd['chk']); ?></label>
           </div>
 <?php else: ?>
           <label><?php echo esc_html($fd['label']); ?><?php echo $fd['req'] ? '<span class="fss-req">必須</span>' : '<span class="fss-opt">任意</span>'; ?></label>
@@ -1012,7 +1019,7 @@ function fss_shortcode($atts = array()) {
       </div>
 <?php endif; ?>
 
-      <button class="fss-submit" type="submit" id="fss-submit"><?php echo esc_html($btn); ?></button>
+      <button class="fss-submit" type="submit"><?php echo esc_html($btn); ?></button>
     </form>
 
     <div class="fss-disc">
@@ -1035,7 +1042,7 @@ function fss_shortcode($atts = array()) {
 <?php endif; ?>
   </div>
 
-  <div class="fss-card fss-result" id="fss-result" style="display:none"></div>
+  <div class="fss-card fss-result" style="display:none"></div>
 </div>
 
 <script>
@@ -1055,6 +1062,7 @@ function fss_shortcode($atts = array()) {
   var formCard = wrap.querySelector('.fss-form-card'), resultCard = wrap.querySelector('.fss-result');
   var btn = wrap.querySelector('.fss-submit');
   var SUBMIT_LABEL = btn ? btn.textContent : '送信';
+  var SENDING = false;   // 送信中フラグ（二重送信の防止。btn.disabled だけではEnter連打を防げない）
 
   var ptypeSel = wrap.querySelector('select[name="ptype"]');
   var cov = wrap.querySelector('.fss-coverage');
@@ -1174,6 +1182,8 @@ function fss_shortcode($atts = array()) {
   form.addEventListener('submit', function(e){
     e.preventDefault();
 
+    if (SENDING) return;   // 送信中の再送信（連打・Enter連打）を止める
+    SENDING = true;
 
     errBox.innerHTML = '';
     btn.disabled = true; btn.textContent = '送信中…';
@@ -1204,6 +1214,7 @@ function fss_shortcode($atts = array()) {
 
     send(false)
       .then(function(d){
+        SENDING = false;
         btn.disabled = false; btn.textContent = SUBMIT_LABEL;
         /* ★応答が正しい形か必ず確かめる。
            admin-ajax は失敗時に -1 や 0 という「JSONとして解釈できてしまう値」を返す。
@@ -1219,6 +1230,7 @@ function fss_shortcode($atts = array()) {
         renderResult(d);
       })
       .catch(function(){
+        SENDING = false;
         btn.disabled = false; btn.textContent = SUBMIT_LABEL;
         errBox.innerHTML = '<div class="fss-err">通信エラーが発生しました。時間をおいて再度お試しください。</div>';
       });
