@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.9.2
+ * Version: 1.9.3
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.9.2');
+define('FSS_VER', '1.9.3');
 define('FSS_OPT', 'fudosan_sateisho_options');
 
 /**
@@ -231,7 +231,10 @@ function fss_hex_to_rgb($hex) {
 /* 表示項目の判定（未保存＝デフォルト表示、保存済みは値そのもの。空='非表示'を区別） */
 function fss_show($key) {
     $o = get_option(FSS_OPT, array());
-    if (!is_array($o) || !array_key_exists('show_' . $key, $o)) return true; // 未設定=表示
+    if (!is_array($o) || !array_key_exists('show_' . $key, $o)) {
+        // 未設定のときの既定。営業案内メールの希望欄だけ既定オフ（必要なサイトは管理画面でON）
+        return $key !== 'marketing';
+    }
     return $o['show_' . $key] === '1';
 }
 
@@ -316,7 +319,7 @@ function fss_settings_page() {
             <h3>フォームに表示する任意項目</h3>
             <table class="form-table"><tr><th>表示する項目</th><td>
                 <label><input type="checkbox" name="<?php echo FSS_OPT; ?>[show_purpose]" value="1" <?php checked(fss_show('purpose')); ?>> 利用目的（売却検討・相続・離婚など）</label><br>
-                <label><input type="checkbox" name="<?php echo FSS_OPT; ?>[show_marketing]" value="1" <?php checked(fss_show('marketing')); ?>> 「営業案内メールを希望」チェック欄</label>
+                <label><input type="checkbox" name="<?php echo FSS_OPT; ?>[show_marketing]" value="1" <?php checked(fss_show('marketing')); ?>> 「営業案内メールを希望」チェック欄（既定オフ）</label>
                 <p class="description">
                     物件の入力項目（マンション／戸建て／土地ごとの項目）は、選ばれた種別に応じて自動で切り替わります。<br>
                     ※ 物件種別・物件住所・メール・同意チェックは常に表示されます。
