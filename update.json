@@ -1,6 +1,6 @@
 {
   "name": "不動産 査定書作成受付",
-  "version": "1.9.3",
+  "version": "1.10.0",
   "download_url": "https://raw.githubusercontent.com/yoshimucom-gif/fudosan-sateisho-plugin/main/fudosan-sateisho.zip",
   "requires": "5.8",
   "tested": "6.7",
@@ -8,6 +8,6 @@
   "author": "ミカタ株式会社",
   "homepage": "https://github.com/yoshimucom-gif/fudosan-sateisho-plugin",
   "sections": {
-    "changelog": "1.9.3\n・「営業案内メールの受け取り希望」チェック欄を既定で非表示にしました（必要な場合は設定→表示項目でオンにできます）"
+    "changelog": "1.10.0\n・受付が届いたらChatworkにも通知できるように（設定→基本設定→「Chatwork通知」）。APIトークンとルームIDを入れ、「テスト投稿を送る」で確認できます\n・Chatworkへの通知が失敗しても、受付そのものは成立します（通知の都合でお申し込みを失わないため）。失敗したときは設定画面に理由が出ます\n・APIトークンは画面に表示しません（変更するときだけ入力。空欄で保存すると今の設定のまま）"
   }
 }

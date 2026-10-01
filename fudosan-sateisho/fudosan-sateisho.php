@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.9.3
+ * Version: 1.10.0
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.9.3');
+define('FSS_VER', '1.10.0');
 define('FSS_OPT', 'fudosan_sateisho_options');
 
 /**
@@ -132,6 +132,10 @@ function fss_sanitize_options($in) {
         'operator_address' => sanitize_text_field($in['operator_address'] ?? ''),
         'from_email'       => sanitize_email($in['from_email'] ?? get_option('admin_email')),
         'notify_email'     => sanitize_email($in['notify_email'] ?? ''),
+        // Chatwork通知。トークンは画面に出さないので、空欄で保存されたら今の値を保つ
+        'chatwork_token'   => fss_keep_secret($in['chatwork_token'] ?? '', 'chatwork_token'),
+        'chatwork_room'    => preg_replace('/[^0-9]/', '', (string) ($in['chatwork_room'] ?? '')),
+        'chatwork_toall'   => !empty($in['chatwork_toall']) ? '1' : '',
         'privacy_url'      => esc_url_raw($in['privacy_url'] ?? ''),
         'terms_url'        => esc_url_raw($in['terms_url'] ?? ''),
         // 表示項目（未送信=チェック外れ=非表示）
@@ -260,6 +264,97 @@ function fss_default_mail_body() {
 }
 
 /* 管理者通知メールの本文（スタッフへ） */
+/**
+ * 秘密の値（APIトークン等）の保存。
+ * 画面には出さない方針なので、空欄で送られてきたら「消す」ではなく「今の値を保つ」。
+ * ※マスクした値（●●●●）を欄に入れてはいけない。そのまま保存されて本物が壊れる。
+ */
+function fss_keep_secret($new, $key) {
+    $new = trim((string) $new);
+    if ($new === '') {
+        $o = get_option(FSS_OPT, array());
+        return isset($o[$key]) ? (string) $o[$key] : '';
+    }
+    return sanitize_text_field($new);
+}
+
+/** Chatwork通知が使える状態か（トークンとルームIDの両方がある） */
+function fss_chatwork_ready() {
+    return (trim(fss_opt('chatwork_token', '')) !== '' && trim(fss_opt('chatwork_room', '')) !== '');
+}
+
+/**
+ * Chatworkへ1件投稿する。
+ * 戻り値: array(成功したか, エラーの説明)
+ *
+ * ★ここで例外を投げない。通知が失敗しても、受付そのものは成立させる
+ *   （お客様の申し込みを通知の都合で失うのが一番まずい）。
+ */
+function fss_chatwork_post($body) {
+    if (!fss_chatwork_ready()) return array(false, 'APIトークンまたはルームIDが未設定です。');
+    $token = trim(fss_opt('chatwork_token', ''));
+    $room  = trim(fss_opt('chatwork_room', ''));
+
+    $res = wp_remote_post('https://api.chatwork.com/v2/rooms/' . rawurlencode($room) . '/messages', array(
+        'timeout' => 20,
+        'headers' => array(
+            'X-ChatWorkToken' => $token,
+            'Content-Type'    => 'application/x-www-form-urlencoded',
+        ),
+        // self_unread=1 … 自分の投稿も未読にする。見落としを防ぐ
+        'body' => array('body' => $body, 'self_unread' => '1'),
+    ));
+    if (is_wp_error($res)) return array(false, $res->get_error_message());
+
+    $code = (int) wp_remote_retrieve_response_code($res);
+    if ($code < 200 || $code >= 300) {
+        $msg = 'HTTP ' . $code;
+        if ($code === 401) $msg .= '（APIトークンが違います）';
+        if ($code === 403) $msg .= '（このトークンでは、そのルームに投稿できません）';
+        if ($code === 404) $msg .= '（ルームIDが見つかりません）';
+        return array(false, $msg);
+    }
+    return array(true, '');
+}
+
+/**
+ * 反響1件ぶんの通知本文。
+ * 社内の通知フォーマットに合わせる:
+ *   ・1行目に発信元のシステム名（どこからの通知か分かるように）
+ *   ・ラベルと値は同じ行、コロンは全角
+ *   ・URLはラベルとは別の行（Chatworkでリンクとして拾われるように）
+ */
+function fss_chatwork_body($ctx, $email) {
+    $sep  = str_repeat('-', 62);
+    $site = fss_opt('site_name', '査定書作成受付');
+
+    $lines = array();
+    if (fss_opt('chatwork_toall', '') === '1') {
+        $lines[] = '[toall]';
+        $lines[] = $sep;
+    }
+    $lines[] = '【' . $site . '】査定書の作成依頼が届きました';
+    $lines[] = 'お客様メール：' . $email;
+    $lines[] = '受付日時：' . current_time('Y-m-d H:i');
+    $lines[] = $sep;
+    $lines[] = '物件種別：' . (isset($ctx['ptype_label']) ? $ctx['ptype_label'] : '');
+    if (!empty($ctx['address'])) $lines[] = '物件住所：' . $ctx['address'];
+    if (!empty($ctx['purpose'])) $lines[] = '利用目的：' . $ctx['purpose'];
+    if (!empty($ctx['details'])) {
+        // 「■ 専有面積 : 70」の形で入っているので、1項目1行のまま渡す
+        foreach (preg_split('/\R/', (string) $ctx['details']) as $ln) {
+            $ln = trim(str_replace('■ ', '', $ln));
+            if ($ln === '') continue;
+            $lines[] = str_replace(' : ', '：', $ln);
+        }
+    }
+    $lines[] = $sep;
+    $lines[] = '▼受付一覧はこちら';
+    $lines[] = admin_url('admin.php?page=fudosan-sateisho-leads');
+    $lines[] = $sep;
+    return implode("\n", $lines);
+}
+
 function fss_admin_notify_body($ctx, $email) {
     $pd = array();
     $pd[] = "■ 物件種別 : {$ctx['ptype_label']}";
@@ -278,6 +373,14 @@ function fss_settings_page() {
     ?>
     <div class="wrap">
         <h1>査定書作成受付 設定</h1>
+        <?php if (isset($_GET['cwtest'])) {
+            $cw_ok = ($_GET['cwtest'] === '1');
+            echo '<div class="notice notice-' . ($cw_ok ? 'success' : 'error') . '"><p>' .
+                ($cw_ok
+                    ? 'Chatworkにテスト投稿を送りました。指定したチャットをご確認ください。'
+                    : 'Chatworkへの投稿に失敗しました：' . esc_html((string) get_option('fss_chatwork_last_error'))) .
+                '</p></div>';
+        } ?>
         <?php if (isset($_GET['testmail'])) {
             $tm_ok = ($_GET['testmail'] === '1');
             $tm_to = isset($_GET['to']) ? sanitize_email(wp_unslash($_GET['to'])) : '';
@@ -310,6 +413,43 @@ function fss_settings_page() {
                     <p class="description">お客様への受付完了メールの差出人。到達率のため WP Mail SMTP 等で SPF/DKIM を設定推奨。</p></td></tr>
                 <tr><th>通知先メール（担当者）</th><td><input type="email" name="<?php echo FSS_OPT; ?>[notify_email]" value="<?php echo esc_attr(fss_opt('notify_email')); ?>" size="40">
                     <p class="description">受付が届いたら、このアドレスに通知します。空欄なら送信元メール（無ければ管理者アドレス）に通知します。</p></td></tr>
+                <tr><th>Chatwork通知</th><td>
+                    <?php $cw_set = (trim(fss_opt('chatwork_token', '')) !== ''); ?>
+                    <p style="margin:0 0 6px">
+                        <label style="display:inline-block;width:9em">APIトークン</label>
+                        <input type="password" name="<?php echo FSS_OPT; ?>[chatwork_token]" value="" size="40" autocomplete="new-password"
+                               placeholder="<?php echo $cw_set ? '設定済み（変更するときだけ入力）' : '未設定'; ?>">
+                    </p>
+                    <p style="margin:0 0 6px">
+                        <label style="display:inline-block;width:9em">ルームID</label>
+                        <input type="text" name="<?php echo FSS_OPT; ?>[chatwork_room]" value="<?php echo esc_attr(fss_opt('chatwork_room')); ?>" size="20" placeholder="例：441557145">
+                    </p>
+                    <p style="margin:0 0 8px">
+                        <label><input type="checkbox" name="<?php echo FSS_OPT; ?>[chatwork_toall]" value="1" <?php checked(fss_opt('chatwork_toall', '') === '1'); ?>>
+                        ルーム全員に通知音を鳴らす（[toall]を付ける）</label>
+                    </p>
+                    <?php if ($cw_set && trim(fss_opt('chatwork_room', '')) !== ''): ?>
+                    <button type="button" class="button" id="fss-cwtest"
+                        data-url="<?php echo esc_url(admin_url('admin-post.php')); ?>"
+                        data-nonce="<?php echo esc_attr(wp_create_nonce('fss_test_chatwork')); ?>">テスト投稿を送る</button>
+                    <?php endif; ?>
+                    <p class="description">
+                        受付が届いたら、メールに加えて<strong>Chatworkにも通知</strong>します。両方とも空欄なら通知しません。<br>
+                        <strong>APIトークンの取り方</strong>：Chatworkにログイン →
+                        右上のご自身の名前 → 「サービス連携」 → 左メニューの「API Token」 →
+                        パスワードを入れて「表示」 → 出てきた文字列をコピーして上の欄に貼り付け。<br>
+                        <strong>ルームIDの調べ方</strong>：通知したいチャットを開いたときのURL
+                        <code>https://www.chatwork.com/#!rid<strong>441557145</strong>-…</code> の
+                        <code>rid</code> の直後の数字です（上の例なら <code>441557145</code>）。<br>
+                        <span class="description">※トークンは画面に表示しません。変更するときだけ入力してください（空欄で保存すると今の設定のままになります）。</span>
+                    </p>
+                    <?php $cw_err = get_option('fss_chatwork_last_error'); if ($cw_err): ?>
+                    <p class="description" style="color:#b32d2e">
+                        <strong>直近の通知に失敗しました：</strong><?php echo esc_html($cw_err); ?><br>
+                        APIトークンとルームIDをご確認のうえ、「テスト投稿を送る」でお試しください。
+                    </p>
+                    <?php endif; ?>
+                </td></tr>
                 <tr><th>プライバシーポリシーURL</th><td><input type="url" name="<?php echo FSS_OPT; ?>[privacy_url]" value="<?php echo esc_attr(fss_opt('privacy_url')); ?>" size="50"></td></tr>
                 <tr><th>利用規約・免責URL</th><td><input type="url" name="<?php echo FSS_OPT; ?>[terms_url]" value="<?php echo esc_attr(fss_opt('terms_url')); ?>" size="50"></td></tr>
             </table>
@@ -421,6 +561,22 @@ function fss_settings_page() {
     </div>
     <script>
     (function(){
+        // Chatworkのテスト投稿。設定フォームの中に form は置けないので、押した時に組み立てて送る
+        var cwBtn = document.getElementById('fss-cwtest');
+        if (cwBtn) cwBtn.addEventListener('click', function(){
+            var f = document.createElement('form');
+            f.method = 'post';
+            f.action = cwBtn.getAttribute('data-url');
+            var vals = { action: 'fss_test_chatwork', _wpnonce: cwBtn.getAttribute('data-nonce') };
+            Object.keys(vals).forEach(function(k){
+                var i = document.createElement('input');
+                i.type = 'hidden'; i.name = k; i.value = vals[k];
+                f.appendChild(i);
+            });
+            document.body.appendChild(f);
+            f.submit();
+        });
+
         var tabs = document.querySelectorAll('#fss-tabs .nav-tab');
         var panels = document.querySelectorAll('.fss-tabpanel');
         var save = document.getElementById('fss-save');
@@ -652,6 +808,30 @@ function fss_mail_subject() {
 }
 
 /* テストメール送信（迷惑メール判定・文面の確認用） */
+add_action('admin_post_fss_test_chatwork', 'fss_test_chatwork');
+function fss_test_chatwork() {
+    if (!current_user_can('manage_options')) wp_die('権限がありません');
+    check_admin_referer('fss_test_chatwork');
+
+    $body = fss_chatwork_body(array(
+        'ptype_label' => '中古マンション',
+        'address'     => '岡山県岡山市北区表町1-2-3',
+        'purpose'     => '売却を検討している',
+        'details'     => "■ マンション名 : テストマンション\n■ 専有面積（㎡） : 70\n■ 築年（西暦） : 2015",
+    ), 'test@example.com');
+    $body = "[テスト投稿]\n" . $body;
+
+    list($ok, $err) = fss_chatwork_post($body);
+    if ($ok) {
+        delete_option('fss_chatwork_last_error');
+    } else {
+        update_option('fss_chatwork_last_error', $err . ' @ ' . current_time('mysql'), false);
+    }
+    // エラー文はURLに載せない（トークンの断片が混ざることがある）。控えから読む
+    wp_safe_redirect(admin_url('admin.php?page=fudosan-sateisho&cwtest=' . ($ok ? '1' : '0')));
+    exit;
+}
+
 add_action('admin_post_fss_test_mail', 'fss_test_mail');
 function fss_test_mail() {
     if (!current_user_can('manage_options')) wp_die('権限がありません');
@@ -793,6 +973,17 @@ function fss_ajax() {
     $notify = fss_opt('notify_email', $from ?: get_option('admin_email'));
     if ($notify) {
         wp_mail($notify, '【査定書作成】新しい受付が届きました', fss_admin_notify_body($ctx, $email), $headers);
+    }
+
+    // Chatwork通知。★失敗しても受付は成立させる（通知の都合でお客様の申し込みを失わない）
+    if (fss_chatwork_ready()) {
+        list($cw_ok, $cw_err) = fss_chatwork_post(fss_chatwork_body($ctx, $email));
+        if (!$cw_ok) {
+            // 気づけるように控えておく（設定画面に出す）
+            update_option('fss_chatwork_last_error', $cw_err . ' @ ' . current_time('mysql'), false);
+        } else {
+            delete_option('fss_chatwork_last_error');
+        }
     }
 
     wp_send_json(array(
