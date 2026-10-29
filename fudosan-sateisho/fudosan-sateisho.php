@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 不動産 査定書作成受付
  * Description: 査定書の作成を受け付けるフォーム。物件情報とメールを受け取り、受付完了メールを自動返信＋管理者に通知。査定書は後日スタッフが作成して送付。ショートコード [fudosan_sateisho] をページに貼るだけ。
- * Version: 1.10.0
+ * Version: 1.11.0
  * Author: (運営者)
  * License: GPLv2 or later
  * Text Domain: fudosan-sateisho
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit; // 直接アクセス禁止
 
-define('FSS_VER', '1.10.0');
+define('FSS_VER', '1.11.0');
 define('FSS_OPT', 'fudosan_sateisho_options');
 
 /**
@@ -51,6 +51,10 @@ function fss_activate() {
         details LONGTEXT NULL,
         purpose VARCHAR(50) NULL,
         marketing_opt_in TINYINT(1) DEFAULT 0,
+        src_ref VARCHAR(255) NULL,
+        src_land VARCHAR(255) NULL,
+        src_utm VARCHAR(191) NULL,
+        src_page VARCHAR(255) NULL,
         PRIMARY KEY  (id)
     ) $charset;";
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -69,6 +73,10 @@ function fss_ensure_columns() {
         'address'      => 'VARCHAR(255) NULL',
         'details'      => 'LONGTEXT NULL',
         'purpose'      => 'VARCHAR(50) NULL',
+        'src_ref'      => 'VARCHAR(255) NULL',
+        'src_land'     => 'VARCHAR(255) NULL',
+        'src_utm'      => 'VARCHAR(191) NULL',
+        'src_page'     => 'VARCHAR(255) NULL',
     );
     foreach ($need as $c => $def) {
         if (!in_array($c, $cols, true)) {
@@ -348,6 +356,10 @@ function fss_chatwork_body($ctx, $email) {
             $lines[] = str_replace(' : ', '：', $ln);
         }
     }
+    if (isset($ctx['src'])) {
+        $lines[] = $sep;
+        foreach (fss_src_lines($ctx['src']) as $ln) $lines[] = $ln;
+    }
     $lines[] = $sep;
     $lines[] = '▼受付一覧はこちら';
     $lines[] = admin_url('admin.php?page=fudosan-sateisho-leads');
@@ -361,6 +373,10 @@ function fss_admin_notify_body($ctx, $email) {
     if (!empty($ctx['address'])) $pd[] = "■ 物件住所 : {$ctx['address']}";
     if (!empty($ctx['purpose'])) $pd[] = "■ 利用目的 : {$ctx['purpose']}";
     if (!empty($ctx['details']))  $pd[] = $ctx['details'];
+    if (isset($ctx['src'])) {
+        $pd[] = '';
+        foreach (fss_src_lines($ctx['src'], ' : ') as $ln) $pd[] = '■ ' . $ln;
+    }
     return "査定書作成の受付が届きました。\n\n"
         . "■ お客様メール : {$email}\n"
         . implode("\n", $pd) . "\n"
@@ -606,18 +622,19 @@ function fss_leads_page() {
     if ($dberr) echo '<div class="notice notice-error"><p><strong>直近に保存エラーが発生しました：</strong> ' . esc_html($dberr) . '<br>最新版に更新すると自動修復を試みます。解消されない場合は、この赤いメッセージの文面を共有してください。</p></div>';
     echo '<p>受付件数：' . $total . ' 件（表示は最新200件）　<a class="button button-primary" href="' . esc_url($export) . '">CSVエクスポート（Excel）</a></p>';
     echo '<table class="widefat striped"><thead><tr>';
-    echo '<th>受付日時</th><th>メール</th><th>種別</th><th>物件住所</th><th>利用目的</th><th>詳細</th><th>営業可</th><th>操作</th></tr></thead><tbody>';
+    echo '<th>受付日時</th><th>メール</th><th>種別</th><th>物件住所</th><th>利用目的</th><th>詳細</th><th>営業可</th><th>流入元</th><th>操作</th></tr></thead><tbody>';
     if ($rows) foreach ($rows as $r) {
         $plabel = isset($GLOBALS['FSS_PTYPE_LABEL'][$r->ptype]) ? $GLOBALS['FSS_PTYPE_LABEL'][$r->ptype] : $r->ptype;
         $det = isset($r->details) ? (string)$r->details : '';
         $del = wp_nonce_url(admin_url('admin-post.php?action=fss_delete_lead&id=' . $r->id), 'fss_delete_lead_' . $r->id);
-        printf('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td style="white-space:pre-line;font-size:12px;line-height:1.5">%s</td><td>%s</td><td><a href="%s" onclick="return confirm(\'この受付を削除しますか？\')" style="color:#b32d2e">削除</a></td></tr>',
+        $src = fss_src_label($r) . (!empty($r->src_land) ? "\n入口 " . $r->src_land : '') . (!empty($r->src_page) ? "\n申込 " . $r->src_page : '');
+        printf('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td style="white-space:pre-line;font-size:12px;line-height:1.5">%s</td><td>%s</td><td style="white-space:pre-line;font-size:12px;line-height:1.5">%s</td><td><a href="%s" onclick="return confirm(\'この受付を削除しますか？\')" style="color:#b32d2e">削除</a></td></tr>',
             esc_html($r->created_at), esc_html($r->email), esc_html($plabel),
             esc_html((isset($r->address) && $r->address !== '') ? $r->address : '-'),
             esc_html((isset($r->purpose) && $r->purpose !== '') ? $r->purpose : '-'),
             esc_html($det !== '' ? $det : '-'),
-            $r->marketing_opt_in ? '○' : '', esc_url($del));
-    } else echo '<tr><td colspan="8">まだありません</td></tr>';
+            $r->marketing_opt_in ? '○' : '', esc_html($src), esc_url($del));
+    } else echo '<tr><td colspan="9">まだありません</td></tr>';
     echo '</tbody></table></div>';
 }
 
@@ -633,7 +650,76 @@ function fss_leads_page() {
 function fss_trim_len($s, $max) {
     $s = (string)$s;
     if ($s === '') return $s;
-    return function_exists('mb_substr') ? mb_substr($s, 0, $max) : substr($s, 0, $max);
+    if (function_exists('mb_substr')) return mb_substr($s, 0, $max);
+    // mbstring の無いサーバー。substr はバイトで切る＝日本語の途中で切れて壊れた文字になり、
+    // 保存が失敗してリードが消える。PCRE の u フラグで「文字数」で切る
+    return preg_match('/^.{0,' . (int)$max . '}/us', $s, $m) ? $m[0] : '';
+}
+
+/* =========================================================================
+ * 流入元の記録（どこから来た人の申し込みか）
+ * 訪問の入口で「参照元・最初に見たページ・utm」をブラウザに覚えさせ、申し込み時に一緒に送る。
+ * 匿名査定と同じ保存キー（fudosan_lead_src）を使う＝両方入っていても1回だけ動き、同じ値を読む。
+ * 参照元はドメインとパスだけ残す（検索語などのクエリは個人情報になり得るので捨てる）。
+ * 新しい外部の参照元かutm付きで来たら上書きし、サイト内の移動や直接の再訪では上書きしない（30日で失効）。
+ * ======================================================================= */
+add_action('wp_head', 'fss_src_tracker', 1);
+function fss_src_tracker() {
+    if (is_admin()) return;
+    if (function_exists('fs_src_tracker')) return;   // 匿名査定が同じ処理を出している
+    echo "<script>" . fss_src_tracker_js() . "</script>\n";
+}
+
+function fss_src_tracker_js() {
+    return <<<'JS'
+(function(){if(window.__fudosanSrc)return;window.__fudosanSrc=1;try{var K='fudosan_lead_src',now=Date.now(),dec=function(s){try{return decodeURIComponent(s);}catch(e){return s;}};var q=new URLSearchParams(location.search),utm=q.get('utm_source')?[q.get('utm_source'),q.get('utm_medium')||'',q.get('utm_campaign')||''].join(' / '):'';var ref='',host='';if(document.referrer){try{var u=new URL(document.referrer);host=u.hostname;ref=u.protocol+'//'+u.host+dec(u.pathname);}catch(e){}}var ext=host&&host!==location.hostname;var cur=null;try{cur=JSON.parse(localStorage.getItem(K)||'null');}catch(e){}if(cur&&now-cur.t>2592e6)cur=null;if(!cur||ext||utm){var inner=!cur&&!ext&&!utm&&host!=='';cur={t:now,ref:(ext||inner)?ref:'',land:inner?dec(new URL(document.referrer).pathname):dec(location.pathname),utm:utm};try{localStorage.setItem(K,JSON.stringify(cur));}catch(e){}}window.__fudosanSrcData=cur;}catch(e){}})();
+JS;
+}
+
+/* 申し込みと一緒に送られてきた流入元。カラム長に丸める（超えるとinsertが失敗してリードが消える） */
+function fss_src_from_post() {
+    $get = function ($k, $max) {
+        $v = isset($_POST[$k]) ? sanitize_text_field(wp_unslash($_POST[$k])) : '';
+        return fss_trim_len($v, $max);
+    };
+    return array(
+        'src_ref'  => $get('src_ref', 255),
+        'src_land' => $get('src_land', 255),
+        'src_utm'  => $get('src_utm', 191),
+        'src_page' => $get('src_page', 255),
+    );
+}
+
+/* 参照元を人が読める言葉にする（検索・AI・他サイト・直接） */
+function fss_src_label($s) {
+    $s = (array) $s;
+    if (empty($s['src_land'])) return '不明（記録なし）';
+    if (!empty($s['src_utm'])) return 'キャンペーン（' . $s['src_utm'] . '）';
+    $host = !empty($s['src_ref']) ? strtolower((string) parse_url($s['src_ref'], PHP_URL_HOST)) : '';
+    if ($host === '') return '直接（ブックマーク・URL入力・アプリ内など）';
+    // 記録処理の無いページ（別のWPで動く /setagaya/ など）から移ってきた。入口はその直前のページ
+    if ($host === strtolower((string) parse_url(home_url('/'), PHP_URL_HOST))) return 'サイト内の別ページから（その前は不明）';
+    // 前から順に判定する（gemini.google を google より先に）
+    $map = array(
+        'gemini.google' => 'AI（Gemini）', 'chatgpt.com' => 'AI（ChatGPT）', 'openai.com' => 'AI（ChatGPT）',
+        'perplexity.ai' => 'AI（Perplexity）', 'copilot' => 'AI（Copilot）',
+        'google.' => '検索（Google）', 'yahoo.' => '検索（Yahoo!）', 'bing.com' => '検索（Bing）',
+        'duckduckgo.' => '検索（DuckDuckGo）',
+    );
+    foreach ($map as $needle => $label) {
+        if (strpos($host, $needle) !== false) return $label;
+    }
+    return '他サイト（' . $host . '）';
+}
+
+/* 通知に載せる行 */
+function fss_src_lines($s, $sep = '：') {
+    $s = (array) $s;
+    $lines = array('流入元' . $sep . fss_src_label($s));
+    if (!empty($s['src_ref']))  $lines[] = '参照元URL' . $sep . $s['src_ref'];
+    if (!empty($s['src_land'])) $lines[] = '最初に見たページ' . $sep . $s['src_land'];
+    if (!empty($s['src_page'])) $lines[] = '申し込んだページ' . $sep . $s['src_page'];
+    return $lines;
 }
 
 function fss_client_ip() {
@@ -694,11 +780,12 @@ function fss_export_leads() {
     header('Content-Type: text/csv; charset=Shift_JIS');
     header('Content-Disposition: attachment; filename="sateisho_uketsuke.csv"');
     $out = fopen('php://output', 'w');
-    $head = array('ID','受付日時','メール','種別','物件住所','利用目的','詳細','営業同意');
-    $cols = array('id','created_at','email','ptype','address','purpose','details','marketing_opt_in');
+    $head = array('ID','受付日時','メール','種別','物件住所','利用目的','詳細','営業同意','流入元','参照元URL','最初に見たページ','申し込んだページ','utm');
+    $cols = array('id','created_at','email','ptype','address','purpose','details','marketing_opt_in','src_label','src_ref','src_land','src_page','src_utm');
     $sjis = function ($s) { return mb_convert_encoding((string)$s, 'SJIS-win', 'UTF-8'); };
     fputcsv($out, array_map($sjis, $head));
     foreach ($rows as $r) {
+        $r['src_label'] = fss_src_label($r);
         $line = array();
         foreach ($cols as $c) {
             $v = isset($r[$c]) ? $r[$c] : '';
@@ -937,7 +1024,8 @@ function fss_ajax() {
     // リード保存（受付）
     global $wpdb;
     // 住所は必須の自由入力。255文字を超えるとinsertが失敗しリードが消えるため丸める
-    $row = array(
+    $src = fss_src_from_post();
+    $row = $src + array(
         'created_at' => current_time('mysql'), 'email' => $email,
         'ptype' => $ptype, 'address' => fss_trim_len($address, 255), 'details' => $details,
         'purpose' => $purpose, 'marketing_opt_in' => $mkt ? 1 : 0,
@@ -960,6 +1048,7 @@ function fss_ajax() {
 
     $ctx = array(
         'ptype_label' => $label, 'address' => $address, 'details' => $details, 'purpose' => $purpose,
+        'src' => $src,
     );
 
     // 受付完了メール（お客様へ）
@@ -1246,6 +1335,20 @@ function fss_shortcode($atts = array()) {
   var LOADED_AT = Date.now();   // ページキャッシュがあってもJS側で計測すれば正しく効く
   var WRAP_ID = <?php echo wp_json_encode($uid); ?>;
 
+  /* 流入元（wp_head の記録処理がブラウザに覚えさせた値）を申し込みに添える。
+     保存できないブラウザでも、記録処理がその場で作った値（__fudosanSrcData）を使う。 */
+  function appendSrc(fd){
+    var s = window.__fudosanSrcData || null;
+    if (!s) { try { s = JSON.parse(localStorage.getItem('fudosan_lead_src') || 'null'); } catch (e) {} }
+    s = s || {};
+    var page = location.pathname;
+    try { page = decodeURIComponent(page); } catch (e) {}
+    fd.set('src_ref', s.ref || '');
+    fd.set('src_land', s.land || '');
+    fd.set('src_utm', s.utm || '');
+    fd.set('src_page', page);
+  }
+
   function init(){
   var wrap = document.getElementById(WRAP_ID);
   if (!wrap || wrap.getAttribute('data-fss-init')) return;
@@ -1386,6 +1489,7 @@ function fss_shortcode($atts = array()) {
     fd.append('action', 'fudosan_sateisho');
     fd.append('nonce', NONCE);
     fd.append('fss_elapsed', String(Date.now() - LOADED_AT));   // 表示から送信までの経過ms（ボット判定）
+    appendSrc(fd);
 
     /* ページキャッシュで古いnonceが配られていると 403 になる。
        その場合だけ新しいnonceを取り直して1回だけ送り直す。 */
@@ -1421,6 +1525,7 @@ function fss_shortcode($atts = array()) {
         errBox.scrollIntoView({ behavior:'smooth', block:'center' });   // 画面外だと「無反応」に見えて連打される
         return;
       }
+        try { if (typeof window.gtag === 'function') window.gtag('event', 'generate_lead', { lead_form: 'sateisho' }); } catch (e) {}
         renderResult(d);
       })
       .catch(function(){
